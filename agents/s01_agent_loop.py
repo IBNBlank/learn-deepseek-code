@@ -57,7 +57,7 @@ def agent_loop(client: Anthropic, messages: list):
             system=SYSTEM_PROMPT,
             messages=messages,
             tools=TOOLS,
-            max_tokens=64000,
+            max_tokens=16000,
         )
 
         # Append assistant turn

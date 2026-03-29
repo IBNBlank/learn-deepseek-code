@@ -190,7 +190,7 @@ def agent_loop(client: Anthropic, messages: list):
             system=SYSTEM_PROMPT,
             messages=messages,
             tools=TOOLS,
-            max_tokens=64000,
+            max_tokens=16000,
         )
         messages.append({"role": "assistant", "content": response.content})
         if response.stop_reason != "tool_use":
