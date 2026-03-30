@@ -10,7 +10,8 @@ import os, sys, subprocess
 from anthropic import Anthropic
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.constant import API_KEY, BASE_URL, MODEL
+from agents.utils import API_KEY, BASE_URL, MODEL
+from agents.utils import LOG_DIR, init_log, append_msg, divide_log
 
 CUR_WORK_DIR = os.getcwd()
 SYSTEM_PROMPT = (f"You are a coding agent at {CUR_WORK_DIR}. "
@@ -39,7 +40,7 @@ def run_bash(command: str) -> str:
         r = subprocess.run(
             command,
             shell=True,
-            cwd=os.getcwd(),
+            cwd=CUR_WORK_DIR,
             capture_output=True,
             text=True,
             timeout=120,
@@ -50,7 +51,7 @@ def run_bash(command: str) -> str:
         return "Error: Timeout (120s)"
 
 
-def agent_loop(client: Anthropic, messages: list):
+def agent_loop(client: Anthropic, messages: list, log_path: str):
     while True:
         response = client.messages.create(
             model=MODEL,
@@ -61,7 +62,10 @@ def agent_loop(client: Anthropic, messages: list):
         )
 
         # Append assistant turn
-        messages.append({"role": "assistant", "content": response.content})
+        append_msg(messages, {
+            "role": "assistant",
+            "content": response.content
+        }, log_path)
 
         # If the model didn't call a tool, we're done
         if response.stop_reason != "tool_use":
@@ -79,27 +83,36 @@ def agent_loop(client: Anthropic, messages: list):
                     "tool_use_id": block.id,
                     "content": output
                 })
-        messages.append({"role": "user", "content": results})
+        append_msg(messages, {"role": "user", "content": results}, log_path)
+
+        # Divide the log
+        divide_log(log_path)
 
 
 if __name__ == "__main__":
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
     history = []
-    while True:
-        try:
-            query = input("\033[36ms01 >> \033[0m")
-        except (EOFError, KeyboardInterrupt):
-            break
-        if query.strip().lower() in ("q", "exit", ""):
-            break
 
-        history.append({"role": "user", "content": query})
-        agent_loop(client, history)
+    log_path = os.path.join(LOG_DIR, "s01_history.md")
+    init_log(log_path)
+    try:
+        while True:
+            try:
+                query = input("\033[36ms01 >> \033[0m")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if query.strip().lower() in ("q", "exit", ""):
+                break
 
-        response_content = history[-1]["content"]
-        if isinstance(response_content, list):
-            for block in response_content:
-                if hasattr(block, "text"):
-                    print(f"\n\033[32m[Answer]\033[0m")
-                    print(block.text)
-        print()
+            append_msg(history, {"role": "user", "content": query}, log_path)
+            agent_loop(client, history, log_path)
+
+            response_content = history[-1]["content"]
+            if isinstance(response_content, list):
+                for block in response_content:
+                    if hasattr(block, "text"):
+                        print(f"\n\033[32m[Answer]\033[0m")
+                        print(block.text)
+            print()
+    except KeyboardInterrupt:
+        pass
