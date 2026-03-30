@@ -42,7 +42,7 @@ def agent_loop(
         for block in response.content:
             if block.type == "tool_use":
                 print(
-                    f"\033[33m {block.name}\033[0m \033[34m{block.input}\033[0m"
+                    f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
                     output = tool_manager.run_tool(block.name, block.input, wd)

@@ -42,7 +42,7 @@ def agent_loop(
         for block in response.content:
             if block.type == "tool_use":
                 print(
-                    f"\033[33m {block.name}\033[0m \033[34m{block.input}\033[0m"
+                    f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
                     output = tool_manager.run_tool(block.name, block.input, wd)
@@ -62,9 +62,8 @@ def agent_loop(
 
 if __name__ == "__main__":
     cur_work_dir = os.getcwd()
-
-    tool_names = ["bash", "read_file", "write_file", "edit_file"]
-    tool_manager = ToolManager(tool_names)
+    tool_manager = ToolManager(
+        ["bash", "read_file", "write_file", "edit_file"])
     agent_config = {
         "model":
         MODEL,

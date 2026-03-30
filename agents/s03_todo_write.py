@@ -44,7 +44,7 @@ def agent_loop(
         for block in response.content:
             if block.type == "tool_use":
                 print(
-                    f"\033[33m {block.name}\033[0m \033[34m{block.input}\033[0m"
+                    f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
                     output = tool_manager.run_tool(block.name, block.input, wd)
@@ -67,13 +67,16 @@ def agent_loop(
                 "text": "<reminder>Update your todos.</reminder>"
             })
 
-        append_msg(messages, {"role": "user", "content": results}, agent_config["log_path"])
+        append_msg(messages, {
+            "role": "user",
+            "content": results
+        }, agent_config["log_path"])
 
 
 if __name__ == "__main__":
     cur_work_dir = os.getcwd()
-    tool_names = ["bash", "read_file", "write_file", "edit_file", "todo"]
-    tool_manager = ToolManager(tool_names)
+    tool_manager = ToolManager(
+        ["bash", "read_file", "write_file", "edit_file", "todo"])
     agent_config = {
         "model":
         MODEL,
@@ -90,7 +93,7 @@ if __name__ == "__main__":
 Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done.
 Prefer tools over prose.""",
     }
-    
+
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
     history = []
     init_log(agent_config["log_path"])
@@ -103,8 +106,11 @@ Prefer tools over prose.""",
             if query.strip().lower() in ("q", "exit", ""):
                 break
 
-            append_msg(history, {"role": "user", "content": query}, log_path)
-            agent_loop(client, history, log_path, agent_config)
+            append_msg(history, {
+                "role": "user",
+                "content": query
+            }, agent_config["log_path"])
+            agent_loop(client, history, agent_config)
 
             response_content = history[-1]["content"]
             if isinstance(response_content, list):
