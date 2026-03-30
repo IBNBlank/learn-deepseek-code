@@ -13,10 +13,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.utils import API_KEY, BASE_URL, MODEL
 from agents.utils import LOG_DIR, init_log, append_msg, divide_log
 
-CUR_WORK_DIR = os.getcwd()
-SYSTEM_PROMPT = (f"You are a coding agent at {CUR_WORK_DIR}. "
-                 "Use bash to solve tasks. Act, don't explain.")
-
 TOOLS = [{
     "name": "bash",
     "description": "Run a shell command.",
@@ -32,7 +28,7 @@ TOOLS = [{
 }]
 
 
-def run_bash(command: str) -> str:
+def run_bash(command: str, cur_work_dir: str) -> str:
     dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
@@ -40,7 +36,7 @@ def run_bash(command: str) -> str:
         r = subprocess.run(
             command,
             shell=True,
-            cwd=CUR_WORK_DIR,
+            cwd=cur_work_dir,
             capture_output=True,
             text=True,
             timeout=120,
@@ -51,14 +47,19 @@ def run_bash(command: str) -> str:
         return "Error: Timeout (120s)"
 
 
-def agent_loop(client: Anthropic, messages: list, log_path: str):
+def agent_loop(
+    client: Anthropic,
+    messages: list,
+    log_path: str,
+    agent_config: dict,
+):
     while True:
         response = client.messages.create(
-            model=MODEL,
-            system=SYSTEM_PROMPT,
+            model=agent_config["model"],
+            system=agent_config["system_prompt"],
             messages=messages,
-            tools=TOOLS,
-            max_tokens=16000,
+            tools=agent_config["tools"],
+            max_tokens=agent_config["max_tokens"],
         )
 
         # Append assistant turn
@@ -76,7 +77,13 @@ def agent_loop(client: Anthropic, messages: list, log_path: str):
         for block in response.content:
             if block.type == "tool_use":
                 print(f"\033[33m$ {block.input['command']}\033[0m")
-                output = run_bash(block.input["command"])
+                if block.name == "bash":
+                    output = run_bash(
+                        block.input["command"],
+                        agent_config["cur_work_dir"],
+                    )
+                else:
+                    output = f"Unknown tool: {block.name}"
                 print(output)
                 results.append({
                     "type": "tool_result",
@@ -90,6 +97,19 @@ def agent_loop(client: Anthropic, messages: list, log_path: str):
 
 
 if __name__ == "__main__":
+    cur_work_dir = os.getcwd()
+    agent_config = {
+        "model":
+        MODEL,
+        "tools":
+        TOOLS,
+        "max_tokens":
+        16000,
+        "cur_work_dir":
+        cur_work_dir,
+        "system_prompt":
+        f"You are a coding agent at {cur_work_dir}. Use bash to solve tasks. Act, don't explain.",
+    }
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
     history = []
 
@@ -105,7 +125,7 @@ if __name__ == "__main__":
                 break
 
             append_msg(history, {"role": "user", "content": query}, log_path)
-            agent_loop(client, history, log_path)
+            agent_loop(client, history, log_path, agent_config)
 
             response_content = history[-1]["content"]
             if isinstance(response_content, list):

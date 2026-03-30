@@ -8,19 +8,27 @@
 
 import os
 
+########################################################
+# path
+########################################################
 BASE_DIR = f"{os.path.dirname(os.path.abspath(__file__))}/.."
+AGENT_DIR = f"{BASE_DIR}/agents"
+SKILLS_DIR = f"{BASE_DIR}/skills"
 LOG_DIR = f"{BASE_DIR}/logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
+########################################################
+# api
+########################################################
 API_KEY_FILE = f"{BASE_DIR}/api_key"
 with open(API_KEY_FILE, "r") as f:
     API_KEY = f.read().strip()
-
 BASE_URL = "https://api.deepseek.com/anthropic"
-
 MODEL = "deepseek-chat"
 
-# Thinking / answer section labels (HTML <font> for viewers that render tags).
+########################################################
+# log
+########################################################
 _THINKING_HDR = '\n\n<font color="cyan">[thinking]</font>\n'
 _ANSWER_HDR = '\n\n<b><font color="green">[answer]</font></b>\n'
 
@@ -99,18 +107,24 @@ def _format_content_for_log(content) -> str:
     return "\n".join(lines).rstrip()
 
 
-def append_log(message: dict, log_path: str) -> None:
+def append_log(message: dict, log_path: str, sub_agent: bool = False) -> None:
     chunks = []
     body = _format_content_for_log(message["content"])
-    chunks.append(f"## {message['role'].upper()}\n{body}\n")
+    if sub_agent:
+        chunks.append(f"## SUBAGENT {message['role'].upper()}\n{body}\n")
+    else:
+        chunks.append(f"## {message['role'].upper()}\n{body}\n")
     block = "\n".join(chunks)
     with open(log_path, "a", encoding="utf-8") as f:
         f.write(block)
 
 
-def append_msg(messages: list, msg: dict, log_path: str) -> None:
+def append_msg(messages: list,
+               msg: dict,
+               log_path: str,
+               sub_agent: bool = False) -> None:
     messages.append(msg)
-    append_log(msg, log_path)
+    append_log(msg, log_path, sub_agent)
 
 
 def divide_log(log_path: str) -> None:

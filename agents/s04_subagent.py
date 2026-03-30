@@ -3,7 +3,7 @@
 ################################################################
 # Copyright 2026 Dong Zhaorui. All rights reserved.
 # Author: Dong Zhaorui 847235539@qq.com
-# Date  : 2026-03-29
+# Date  : 2026-03-30
 ################################################################
 
 import os, sys, subprocess
@@ -12,73 +12,6 @@ from anthropic import Anthropic
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.utils import API_KEY, BASE_URL, MODEL
 from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-
-TOOLS = [
-    {
-        "name": "bash",
-        "description": "Run a shell command.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string"
-                }
-            },
-            "required": ["command"]
-        }
-    },
-    {
-        "name": "read_file",
-        "description": "Read file contents.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string"
-                },
-                "limit": {
-                    "type": "integer"
-                }
-            },
-            "required": ["path"]
-        }
-    },
-    {
-        "name": "write_file",
-        "description": "Write content to file.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                }
-            },
-            "required": ["path", "content"]
-        }
-    },
-    {
-        "name": "edit_file",
-        "description": "Replace exact text in file.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string"
-                },
-                "old_text": {
-                    "type": "string"
-                },
-                "new_text": {
-                    "type": "string"
-                }
-            },
-            "required": ["path", "old_text", "new_text"]
-        }
-    },
-]
 
 
 def safe_path(p: str, root: str) -> str:
@@ -152,6 +85,177 @@ def run_edit(path: str, old_text: str, new_text: str,
         return f"Error: {e}"
 
 
+CHILD_TOOLS = [
+    {
+        "name": "bash",
+        "description": "Run a shell command.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string"
+                }
+            },
+            "required": ["command"]
+        }
+    },
+    {
+        "name": "read_file",
+        "description": "Read file contents.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "limit": {
+                    "type": "integer"
+                }
+            },
+            "required": ["path"]
+        }
+    },
+    {
+        "name": "write_file",
+        "description": "Write content to file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                }
+            },
+            "required": ["path", "content"]
+        }
+    },
+    {
+        "name": "edit_file",
+        "description": "Replace exact text in file.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "old_text": {
+                    "type": "string"
+                },
+                "new_text": {
+                    "type": "string"
+                }
+            },
+            "required": ["path", "old_text", "new_text"]
+        }
+    },
+]
+PARENT_TOOLS = CHILD_TOOLS + [
+    {
+        "name": "task",
+        "description":
+        "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "prompt": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Short description of the task"
+                }
+            },
+            "required": ["prompt"]
+        }
+    },
+]
+
+
+def run_subagent(
+    client: Anthropic,
+    prompt: str,
+    log_path: str,
+    agent_config: dict,
+) -> str:
+    sub_messages = []  # fresh context
+    append_msg(
+        sub_messages,
+        {
+            "role": "user",
+            "content": prompt
+        },
+        log_path,
+        sub_agent=True,
+    )
+
+    wd = agent_config["cur_work_dir"]
+    for _ in range(30):  # safety limit
+        response = client.messages.create(
+            model=agent_config["model"],
+            system=agent_config["subagent_system_prompt"],
+            messages=sub_messages,
+            tools=agent_config["child_tools"],
+            max_tokens=agent_config["max_tokens"],
+        )
+        append_msg(
+            sub_messages,
+            {
+                "role": "assistant",
+                "content": response.content,
+            },
+            log_path,
+            sub_agent=True,
+        )
+        if response.stop_reason != "tool_use":
+            break
+
+        results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                try:
+                    if block.name == "bash":
+                        output = run_bash(block.input["command"], wd)
+                    elif block.name == "read_file":
+                        output = run_read(
+                            block.input["path"],
+                            wd,
+                            block.input.get("limit"),
+                        )
+                    elif block.name == "write_file":
+                        output = run_write(
+                            block.input["path"],
+                            block.input["content"],
+                            wd,
+                        )
+                    elif block.name == "edit_file":
+                        output = run_edit(
+                            block.input["path"],
+                            block.input["old_text"],
+                            block.input["new_text"],
+                            wd,
+                        )
+                    else:
+                        output = f"Unknown tool: {block.name}"
+                except Exception as e:
+                    output = f"Error: {e}"
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": str(output)
+                })
+        append_msg(sub_messages, {
+            "role": "user",
+            "content": results
+        },
+                   log_path,
+                   sub_agent=True)
+
+    return "".join(b.text for b in response.content
+                   if hasattr(b, "text")) or "(no summary)"
+
+
 def agent_loop(
     client: Anthropic,
     messages: list,
@@ -181,7 +285,18 @@ def agent_loop(
                     f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
-                    if block.name == "bash":
+                    if block.name == "task":
+                        desc = block.input.get("description", "subtask")
+                        print(
+                            f"\033[35m> task ({desc}): {block.input['prompt']}\033[0m"
+                        )
+                        output = run_subagent(
+                            client,
+                            block.input["prompt"],
+                            log_path,
+                            agent_config,
+                        )
+                    elif block.name == "bash":
                         output = run_bash(block.input["command"], wd)
                     elif block.name == "read_file":
                         output = run_read(
@@ -210,10 +325,9 @@ def agent_loop(
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": output
+                    "content": str(output)
                 })
         append_msg(messages, {"role": "user", "content": results}, log_path)
-
         divide_log(log_path)
 
 
@@ -223,23 +337,27 @@ if __name__ == "__main__":
         "model":
         MODEL,
         "tools":
-        TOOLS,
+        PARENT_TOOLS,
+        "child_tools":
+        CHILD_TOOLS,
         "max_tokens":
         16000,
         "cur_work_dir":
         cur_work_dir,
         "system_prompt":
-        f"You are a coding agent at {cur_work_dir}. Use tools to solve tasks. Act, don't explain.",
+        f"You are a coding agent at {cur_work_dir}. Use the task tool to delegate exploration or subtasks.",
+        "subagent_system_prompt":
+        f"You are a coding subagent at {cur_work_dir}. Complete the given task, then summarize your findings."
     }
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
     history = []
 
-    log_path = os.path.join(LOG_DIR, "s02_history.md")
+    log_path = os.path.join(LOG_DIR, "s04_history.md")
     init_log(log_path)
     try:
         while True:
             try:
-                query = input("\033[36ms02 >> \033[0m")
+                query = input("\033[36ms04 >> \033[0m")
             except (EOFError, KeyboardInterrupt):
                 break
             if query.strip().lower() in ("q", "exit", ""):
