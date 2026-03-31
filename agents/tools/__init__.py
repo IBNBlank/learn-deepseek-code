@@ -11,6 +11,7 @@ from .common import ToolBase
 from .files import EditFileTool, ReadFileTool, WriteFileTool
 from .task import TaskTool
 from .todo import TodoTool
+from .skill import SkillTool
 
 
 _TOOL_CLASSES = {
@@ -19,6 +20,7 @@ _TOOL_CLASSES = {
     "read_file": ReadFileTool,
     "write_file": WriteFileTool,
     "todo": TodoTool,
+    "load_skill": SkillTool,
 }
 
 
@@ -54,4 +56,5 @@ class ToolManager:
 __all__ = [
     "ToolManager",
     "TaskTool",
+    "SkillTool",
 ]
