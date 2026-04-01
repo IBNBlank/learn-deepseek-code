@@ -8,14 +8,15 @@
 
 import os
 
-_THINKING_HDR = '\n\n<font color="cyan">[thinking]</font>\n'
-_ANSWER_HDR = '\n\n<b><font color="green">[answer]</font></b>\n'
-
 
 class LogUtil:
 
-    def __init__(self, log_path: str | None = None):
+    __THINKING_HDR = '\n\n<font color="cyan">[thinking]</font>\n'
+    __ANSWER_HDR = '\n\n<b><font color="green">[answer]</font></b>\n'
+
+    def __init__(self, log_path: str | None = None, is_sub: bool = False):
         self.log_path = log_path
+        self.is_sub = is_sub
 
         if os.path.exists(log_path):
             os.remove(log_path)
@@ -25,9 +26,17 @@ class LogUtil:
             f.write(f"# {name}\n")
             f.write("\n" + "---" + "\n\n")
 
-    def append_log(self, message: dict, sub_agent: bool = False) -> None:
-        body = LogUtil._format_content_for_log(message["content"])
-        if sub_agent:
+    def append_msg(self, messages: list, msg: dict) -> None:
+        messages.append(msg)
+        self.__append_log(msg)
+
+    def divide_log(self) -> None:
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write("\n" + "---" + "\n\n")
+
+    def __append_log(self, message: dict) -> None:
+        body = LogUtil.__format_content_for_log(message["content"])
+        if self.is_sub:
             block = f"## SUBAGENT {message['role'].upper()}\n{body}\n"
         else:
             block = f"## {message['role'].upper()}\n{body}\n"
@@ -35,19 +44,8 @@ class LogUtil:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(block)
 
-    def append_msg(self,
-                   messages: list,
-                   msg: dict,
-                   sub_agent: bool = False) -> None:
-        messages.append(msg)
-        self.append_log(msg, sub_agent=sub_agent)
-
-    def divide_log(self) -> None:
-        with open(self.log_path, "a", encoding="utf-8") as f:
-            f.write("\n" + "---" + "\n\n")
-
     @staticmethod
-    def _format_content_for_log(content) -> str:
+    def __format_content_for_log(content) -> str:
         if isinstance(content, str):
             return content.rstrip()
         lines = []
@@ -55,40 +53,44 @@ class LogUtil:
             if isinstance(block, dict):
                 t = block.get("type") or ""
                 if t == "tool_result":
-                    tid = block.get("tool_use_id")
-                    lines.append(
-                        f"\n<font color='yellow'>[tool_result tool_use_id={tid}]</font>\n"
-                    )
+                    lines.append(LogUtil.__tool_result_hdr(block))
                     lines.append(str(block.get("content", "")))
                 elif t == "thinking":
-                    lines.append(_THINKING_HDR +
+                    lines.append(LogUtil.__THINKING_HDR +
                                  str(block.get("thinking", "")))
                 elif t == "text":
-                    lines.append(_ANSWER_HDR + str(block.get("text", "")))
+                    lines.append(LogUtil.__ANSWER_HDR +
+                                 str(block.get("text", "")))
                 elif t not in ("text", "thinking"):
                     lines.append(
-                        LogUtil._assistant_other_hdr(t) +
-                        LogUtil._format_block_body_dict(block))
+                        LogUtil.__assistant_other_hdr(t) +
+                        LogUtil.__format_block_body_dict(block))
             else:
                 t = getattr(block, "type", None) or ""
                 if t == "thinking":
-                    lines.append(_THINKING_HDR +
+                    lines.append(LogUtil.__THINKING_HDR +
                                  str(getattr(block, "thinking", "")))
                 elif t == "text":
-                    lines.append(_ANSWER_HDR + str(getattr(block, "text", "")))
+                    lines.append(LogUtil.__ANSWER_HDR +
+                                 str(getattr(block, "text", "")))
                 elif t not in ("text", "thinking"):
                     lines.append(
-                        LogUtil._assistant_other_hdr(t) +
-                        LogUtil._format_block_body_obj(block))
+                        LogUtil.__assistant_other_hdr(t) +
+                        LogUtil.__format_block_body_obj(block))
         return "\n".join(lines).rstrip()
 
     @staticmethod
-    def _assistant_other_hdr(block_type: str) -> str:
-        t = block_type or "unknown"
+    def __assistant_other_hdr(block_type: str) -> str:
+        t = block_type
         return f"\n<font color='yellow'>[assistant/{t}]</font>\n"
 
     @staticmethod
-    def _format_block_body_dict(block: dict) -> str:
+    def __tool_result_hdr(block: dict) -> str:
+        tid = block.get("tool_use_id", "unknown")
+        return f"\n<font color='yellow'>[tool_result tool_use_id={tid}]</font>\n"
+
+    @staticmethod
+    def __format_block_body_dict(block: dict) -> str:
         t = block.get("type")
         if t == "tool_use":
             name = block.get("name") or "unknown"
@@ -105,7 +107,7 @@ class LogUtil:
         return str(block)
 
     @staticmethod
-    def _format_block_body_obj(block) -> str:
+    def __format_block_body_obj(block) -> str:
         t = getattr(block, "type", None)
         if t == "tool_use":
             name = getattr(block, "name", None) or "unknown"

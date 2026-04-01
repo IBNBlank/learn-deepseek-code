@@ -6,28 +6,51 @@
 # Date  : 2026-03-31
 ################################################################
 
-from __future__ import annotations
+from typing import TYPE_CHECKING, Any
 
-from .base import KitBase, KitManager
-from .bash import BashKit, BashKitConfig
-from .compact import CompactKit
-from .files import FileKit, FileKitConfig
-from .skill import SkillKit, SkillKitConfig
-from .task import TaskKit, TaskKitConfig
-from .todo import TodoKit, TodoKitConfig
+from .base import KitManager
+from .kit_bash import KitBash, KitBashConfig
+from .kit_files import KitFiles, KitFilesConfig
+from .kit_skill import KitSkill, KitSkillConfig
+from .kit_todo import KitTodo, KitTodoConfig
+from .kit_compact import KitCompact, KitCompactConfig
+
+if TYPE_CHECKING:
+    # Avoid runtime circular imports; these are lazily imported in __getattr__.
+    from .kit_agent import KitAgent, KitAgentConfig
 
 __all__ = [
-    "KitBase",
+    # base
     "KitManager",
-    "BashKit",
-    "BashKitConfig",
-    "CompactKit",
-    "FileKit",
-    "FileKitConfig",
-    "SkillKit",
-    "SkillKitConfig",
-    "TaskKit",
-    "TaskKitConfig",
-    "TodoKit",
-    "TodoKitConfig",
+
+    # bash
+    "KitBash",
+    "KitBashConfig",
+
+    # files
+    "KitFiles",
+    "KitFilesConfig",
+
+    # skill
+    "KitSkill",
+    "KitSkillConfig",
+
+    # todo
+    "KitTodo",
+    "KitTodoConfig",
+
+    # compact
+    "KitCompact",
+    "KitCompactConfig",
+
+    # agent
+    "KitAgent",
+    "KitAgentConfig",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    if name in ("KitAgent", "KitAgentConfig"):
+        from .kit_agent import KitAgent, KitAgentConfig
+        return {"KitAgent": KitAgent, "KitAgentConfig": KitAgentConfig}[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

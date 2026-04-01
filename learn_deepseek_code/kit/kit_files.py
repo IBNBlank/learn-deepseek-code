@@ -14,13 +14,13 @@ from .base import KitBase
 
 
 @dataclass
-class FileKitConfig:
+class KitFilesConfig:
     work_dir: str = os.getcwd()
 
 
-class FileKit(KitBase):
+class KitFiles(KitBase):
 
-    def __init__(self, config: FileKitConfig):
+    def __init__(self, config: KitFilesConfig):
         self._config = config
 
     def specs(self) -> list[dict]:

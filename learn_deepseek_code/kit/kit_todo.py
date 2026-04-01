@@ -13,14 +13,13 @@ from .base import KitBase
 
 
 @dataclass
-class TodoKitConfig:
+class KitTodoConfig:
     pass
 
 
-class TodoKit(KitBase):
+class KitTodo(KitBase):
 
-    def __init__(self, config: TodoKitConfig):
-        self._config = config
+    def __init__(self):
         self._items: list[dict[str, str]] = []
 
     def specs(self) -> list[dict]:
@@ -60,6 +59,11 @@ class TodoKit(KitBase):
     def tools(self) -> dict[str, Callable[[dict], str]]:
         return {"todo": self.run}
 
+    def helpers(self) -> dict[str, Callable[[dict], str]]:
+        return {
+            "todo_reminder": self.reminder,
+        }
+
     def run(self, tool_input: dict) -> str:
         return self._update(tool_input["items"])
 
@@ -98,3 +102,9 @@ class TodoKit(KitBase):
         done = sum(1 for t in self._items if t["status"] == "completed")
         lines.append(f"\n({done}/{len(self._items)} completed)")
         return "\n".join(lines)
+
+    def reminder(self) -> str:
+        return {
+            "type": "text",
+            "text": "<reminder>Update your todos.</reminder>"
+        }

@@ -208,3 +208,5 @@ __marimo__/
 
 api_key
 *history.md
+logs/
+transcripts/

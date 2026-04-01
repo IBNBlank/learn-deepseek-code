@@ -6,43 +6,40 @@
 # Date  : 2026-03-30
 ################################################################
 
-import subprocess
+import os, subprocess
 from dataclasses import dataclass
+from typing import Callable, Optional
 
-from typing import Callable
-
-from .base import ToolBase
+from .base import KitBase
 
 
 @dataclass
-class BashToolConfig:
-    work_dir: str
+class KitBashConfig:
+    work_dir: str = os.getcwd()
     timeout_s: int = 120
 
 
-class BashTool(ToolBase):
+class KitBash(KitBase):
 
-    def __init__(self, config: BashToolConfig):
-        self._config = config
+    def __init__(self, config: Optional[KitBashConfig] = None):
+        self._config = config or KitBashConfig()
 
-    def tool_specs(self) -> list[dict]:
-        return [
-            {
-                "name": "bash",
-                "description": "Run a shell command.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string"
-                        }
-                    },
-                    "required": ["command"]
+    def specs(self) -> list[dict]:
+        return [{
+            "name": "bash",
+            "description": "Run a shell command.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string"
+                    }
                 },
-            }
-        ]
+                "required": ["command"],
+            },
+        }]
 
-    def tool_methods(self) -> dict[str, Callable[[dict], str]]:
+    def tools(self) -> dict[str, Callable[[dict], str]]:
         return {"bash": self.run}
 
     def run(self, tool_input: dict) -> str:

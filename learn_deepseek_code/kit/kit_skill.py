@@ -7,47 +7,53 @@
 ################################################################
 
 from dataclasses import dataclass
+import glob
 import os
 import re
-from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from ..constants import SKILLS_DIR
 from .base import KitBase
 
 
 @dataclass
-class SkillKitConfig:
-    skills_dir: str | None = None
+class KitSkillConfig:
+    skills_dir: str = SKILLS_DIR
 
 
-class SkillKit(KitBase):
+class KitSkill(KitBase):
     """Loads markdown skills (YAML frontmatter + body)."""
 
-    def __init__(self, config: SkillKitConfig):
-        self._config = config
-        sd = config.skills_dir if config.skills_dir is not None else SKILLS_DIR
-        self.skills_dir = os.path.normpath(os.path.join(os.getcwd(), sd))
+    def __init__(self, config: Optional[KitSkillConfig] = None):
+        self._config = config or KitSkillConfig()
         self.skills: dict = {}
         self._load_all()
 
-    def _register_skill(self, full_path: Path) -> None:
-        text = full_path.read_text(encoding="utf-8")
+    def _register_skill(self, full_path: str) -> None:
+        with open(full_path, "r", encoding="utf-8") as f:
+            text = f.read()
         meta, body = self._parse_frontmatter(text)
-        default_name = full_path.parent.name if full_path.name == "SKILL.md" else full_path.stem
+        base = os.path.basename(full_path)
+        default_name = os.path.basename(os.path.dirname(full_path)) if base == "SKILL.md" else os.path.splitext(base)[0]
         name = meta.get("name", default_name)
-        self.skills[name] = {"meta": meta, "body": body, "path": str(full_path)}
+        self.skills[name] = {
+            "meta": meta,
+            "body": body,
+            "path": str(full_path),
+        }
 
     def _load_all(self) -> None:
-        root = Path(self.skills_dir)
-        if not root.is_dir():
+        root = self._config.skills_dir
+        if not os.path.isdir(root):
             return
-        for f in sorted(root.glob("*.md")):
-            self._register_skill(f)
-        for f in sorted(root.rglob("SKILL.md")):
-            if f.parent == root:
+        for full_path in sorted(glob.glob(os.path.join(root, "*.md"))):
+            self._register_skill(full_path)
+
+        for dirpath, _dirnames, filenames in os.walk(root):
+            if os.path.abspath(dirpath) == os.path.abspath(root):
                 continue
-            self._register_skill(f)
+            if "SKILL.md" in filenames:
+                self._register_skill(os.path.join(dirpath, "SKILL.md"))
 
     def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
         match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
@@ -61,19 +67,20 @@ class SkillKit(KitBase):
         return meta, match.group(2).strip()
 
     def specs(self) -> list[dict]:
-        return [
-            {
-                "name": "load_skill",
-                "description": "Load specialized knowledge by name.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string", "description": "Skill name to load"}
-                    },
-                    "required": ["name"],
+        return [{
+            "name": "load_skill",
+            "description": "Load specialized knowledge by name.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Skill name to load"
+                    }
                 },
-            }
-        ]
+                "required": ["name"],
+            },
+        }]
 
     def tools(self) -> dict[str, Callable[[dict], str]]:
         return {"load_skill": self.run}
