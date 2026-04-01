@@ -8,116 +8,61 @@
 
 import os
 import sys
-from anthropic import Anthropic
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.utils import API_KEY, BASE_URL, MODEL
-from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-from agents.tools import (
-    BashToolConfig,
-    FileToolConfig,
-    SkillToolConfig,
-    ToolManager,
-)
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_DIR not in sys.path:
+    sys.path.append(REPO_DIR)
+
+from learn_deepseek_code.agent import AgentMain, AgentMainConfig
+from learn_deepseek_code.constants import LOG_DIR
+from learn_deepseek_code.kit import KitBash, KitBashConfig, KitFiles, KitFilesConfig, KitManager, KitSkill, KitSkillConfig
 
 
-def agent_loop(
-    client: Anthropic,
-    messages: list,
-    agent_config: dict,
-):
-    tool_manager = agent_config["tool_manager"]
-    while True:
-        response = client.messages.create(
-            model=agent_config["model"],
-            system=agent_config["system_prompt"],
-            messages=messages,
-            tools=tool_manager.tool_specs(),
-            max_tokens=agent_config["max_tokens"],
-        )
-        append_msg(messages, {
-            "role": "assistant",
-            "content": response.content
-        }, agent_config["log_path"])
-        if response.stop_reason != "tool_use":
-            divide_log(agent_config["log_path"])
-            return
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                print(
-                    f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
-                )
-                try:
-                    output = tool_manager.run_tool(block.name, block.input)
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(output)
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": str(output)
-                })
-        append_msg(messages, {
-            "role": "user",
-            "content": results
-        }, agent_config["log_path"])
+def print_answer(history: list) -> None:
+    response_content = history[-1].get("content")
+    if isinstance(response_content, list):
+        for block in response_content:
+            if hasattr(block, "text"):
+                print(f"\n\033[32m[Answer]\033[0m")
+                print(block.text)
+        print()
 
 
-if __name__ == "__main__":
+def main() -> int:
     cur_work_dir = os.getcwd()
-    fc = FileToolConfig(work_dir=cur_work_dir)
-    tool_manager = ToolManager({
-        "bash": BashToolConfig(work_dir=cur_work_dir),
-        "read_file": fc,
-        "write_file": fc,
-        "edit_file": fc,
-        "load_skill": SkillToolConfig(),
-    })
-    agent_config = {
-        "model":
-        MODEL,
-        "max_tokens":
-        16000,
-        "cur_work_dir":
-        cur_work_dir,
-        "log_path":
-        os.path.join(LOG_DIR, "s05_history.md"),
-        "tool_manager":
-        tool_manager,
-        "system_prompt":
-        f"""You are a coding agent at {cur_work_dir}.
+    kit_manager = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+        KitSkill(KitSkillConfig()),
+    ])
+    agent = AgentMain(
+        AgentMainConfig(
+            system_prompt=f"""You are a coding agent at {cur_work_dir}.
 Use load_skill to access specialized knowledge before tackling unfamiliar topics.
 
 Skills available:
-{tool_manager.get_tool("load_skill").get_system()}""",
-    }
+{kit_manager.run_helper("skill_get_system", {})}""",
+            kit_manager=kit_manager,
+            log_path=os.path.join(LOG_DIR, "s05_history.md"),
+            cur_work_dir=cur_work_dir,
+        ))
 
-    client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
-    history = []
-    init_log(agent_config["log_path"])
+    history: list = []
     try:
         while True:
             try:
                 query = input("\033[36ms05 >> \033[0m")
             except (EOFError, KeyboardInterrupt):
-                break
+                return 0
             if query.strip().lower() in ("q", "exit", ""):
-                break
+                return 0
 
-            append_msg(history, {
-                "role": "user",
-                "content": query
-            }, agent_config["log_path"])
-            agent_loop(client, history, agent_config)
-
-            response_content = history[-1]["content"]
-            if isinstance(response_content, list):
-                for block in response_content:
-                    if hasattr(block, "text"):
-                        print(f"\n\033[32m[Answer]\033[0m")
-                        print(block.text)
-            print()
+            history.append({"role": "user", "content": query})
+            history = agent.agent_loop(history)
+            print_answer(history)
     except KeyboardInterrupt:
-        pass
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -25,46 +25,9 @@ class KitSkill(KitBase):
     """Loads markdown skills (YAML frontmatter + body)."""
 
     def __init__(self, config: Optional[KitSkillConfig] = None):
-        self._config = config or KitSkillConfig()
+        self.__config = config or KitSkillConfig()
         self.skills: dict = {}
-        self._load_all()
-
-    def _register_skill(self, full_path: str) -> None:
-        with open(full_path, "r", encoding="utf-8") as f:
-            text = f.read()
-        meta, body = self._parse_frontmatter(text)
-        base = os.path.basename(full_path)
-        default_name = os.path.basename(os.path.dirname(full_path)) if base == "SKILL.md" else os.path.splitext(base)[0]
-        name = meta.get("name", default_name)
-        self.skills[name] = {
-            "meta": meta,
-            "body": body,
-            "path": str(full_path),
-        }
-
-    def _load_all(self) -> None:
-        root = self._config.skills_dir
-        if not os.path.isdir(root):
-            return
-        for full_path in sorted(glob.glob(os.path.join(root, "*.md"))):
-            self._register_skill(full_path)
-
-        for dirpath, _dirnames, filenames in os.walk(root):
-            if os.path.abspath(dirpath) == os.path.abspath(root):
-                continue
-            if "SKILL.md" in filenames:
-                self._register_skill(os.path.join(dirpath, "SKILL.md"))
-
-    def _parse_frontmatter(self, text: str) -> tuple[dict, str]:
-        match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
-        if not match:
-            return {}, text
-        meta: dict[str, str] = {}
-        for line in match.group(1).strip().splitlines():
-            if ":" in line:
-                key, val = line.split(":", 1)
-                meta[key.strip()] = val.strip()
-        return meta, match.group(2).strip()
+        self.__load_all()
 
     def specs(self) -> list[dict]:
         return [{
@@ -85,7 +48,55 @@ class KitSkill(KitBase):
     def tools(self) -> dict[str, Callable[[dict], str]]:
         return {"load_skill": self.run}
 
-    def get_system(self) -> str:
+    def helpers(self) -> dict[str, Callable[[dict], str]]:
+        return {"skill_get_system": self.__get_system}
+
+    def run(self, tool_input: dict) -> str:
+        name = tool_input["name"]
+        skill = self.skills.get(name)
+        if not skill:
+            return f"Error: Unknown skill '{name}'. Available: {', '.join(self.skills.keys())}"
+        return f'<skill name="{name}">\n{skill["body"]}\n</skill>'
+
+    def __register_skill(self, full_path: str) -> None:
+        with open(full_path, "r", encoding="utf-8") as f:
+            text = f.read()
+        meta, body = self.__parse_frontmatter(text)
+        base = os.path.basename(full_path)
+        default_name = os.path.basename(os.path.dirname(
+            full_path)) if base == "SKILL.md" else os.path.splitext(base)[0]
+        name = meta.get("name", default_name)
+        self.skills[name] = {
+            "meta": meta,
+            "body": body,
+            "path": str(full_path),
+        }
+
+    def __load_all(self) -> None:
+        root = self.__config.skills_dir
+        if not os.path.isdir(root):
+            return
+        for full_path in sorted(glob.glob(os.path.join(root, "*.md"))):
+            self.__register_skill(full_path)
+
+        for dirpath, _dirnames, filenames in os.walk(root):
+            if os.path.abspath(dirpath) == os.path.abspath(root):
+                continue
+            if "SKILL.md" in filenames:
+                self.__register_skill(os.path.join(dirpath, "SKILL.md"))
+
+    def __parse_frontmatter(self, text: str) -> tuple[dict, str]:
+        match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+        if not match:
+            return {}, text
+        meta: dict[str, str] = {}
+        for line in match.group(1).strip().splitlines():
+            if ":" in line:
+                key, val = line.split(":", 1)
+                meta[key.strip()] = val.strip()
+        return meta, match.group(2).strip()
+
+    def __get_system(self, helper_input: dict) -> str:
         if not self.skills:
             return "(no skills available)"
         lines = []
@@ -97,12 +108,3 @@ class KitSkill(KitBase):
                 line += f" [{tags}]"
             lines.append(line)
         return "\n".join(lines)
-
-    def get_content(self, name: str) -> str:
-        skill = self.skills.get(name)
-        if not skill:
-            return f"Error: Unknown skill '{name}'. Available: {', '.join(self.skills.keys())}"
-        return f'<skill name="{name}">\n{skill["body"]}\n</skill>'
-
-    def run(self, tool_input: dict) -> str:
-        return self.get_content(tool_input["name"])
