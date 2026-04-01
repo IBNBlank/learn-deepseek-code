@@ -14,9 +14,8 @@ class LogUtil:
     __THINKING_HDR = '\n\n<font color="cyan">[thinking]</font>\n'
     __ANSWER_HDR = '\n\n<b><font color="green">[answer]</font></b>\n'
 
-    def __init__(self, log_path: str | None = None, is_sub: bool = False):
+    def __init__(self, log_path: str | None = None):
         self.log_path = log_path
-        self.is_sub = is_sub
 
         if os.path.exists(log_path):
             os.remove(log_path)
@@ -36,10 +35,7 @@ class LogUtil:
 
     def __append_log(self, message: dict) -> None:
         body = LogUtil.__format_content_for_log(message["content"])
-        if self.is_sub:
-            block = f"## SUBAGENT {message['role'].upper()}\n{body}\n"
-        else:
-            block = f"## {message['role'].upper()}\n{body}\n"
+        block = f"## {message['role'].upper()}\n{body}\n"
 
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(block)

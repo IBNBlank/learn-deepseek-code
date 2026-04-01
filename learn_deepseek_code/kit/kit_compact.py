@@ -26,7 +26,8 @@ class KitCompactConfig:
     """
 
     keep_recent: int = 3
-    preserve_result_tools: list[str] = field(default_factory=lambda: ["read_file"])
+    preserve_result_tools: list[str] = field(
+        default_factory=lambda: ["read_file"])
     token_threshold: int = 50_000
     summary_max_tokens: int = 2_000
     conversation_max_chars: int = 80_000
@@ -67,16 +68,16 @@ class KitCompact(KitBase):
 
     def helpers(self) -> dict[str, Callable[[dict], str]]:
         return {
-            "compact_tool_compact": self.tool_compact,
-            "compact_auto_compact": self.auto_compact,
-            "compact_manual_compact": self.manual_compact,
+            "compact_tool_compact": self.__tool_compact,
+            "compact_auto_compact": self.__auto_compact,
+            "compact_manual_compact": self.__manual_compact,
         }
 
     def run(self, tool_input: dict) -> str:
         return "Compressing..."
 
     # -- Layer 1: micro_compact (tool_compact) --
-    def tool_compact(self, messages: list) -> list:
+    def __tool_compact(self, messages: list) -> list:
         # Collect (msg_index, part_index, tool_result_dict) for all tool_result entries
         tool_results = []
         for msg_idx, msg in enumerate(messages):
@@ -111,15 +112,15 @@ class KitCompact(KitBase):
         return messages
 
     # -- Layer 2: auto_compact (token check + agent_compact) --
-    def auto_compact(self, client: Anthropic, model: str,
-                     messages: list) -> list:
+    def __auto_compact(self, client: Anthropic, model: str,
+                       messages: list) -> list:
         if self.__estimate_tokens(messages) > self._config.token_threshold:
             return self.manual_compact(client, model, messages)
         return messages
 
     # -- Layer 3: manual_compact (angent call + agent tool) --
-    def manual_compact(self, client: Anthropic, model: str,
-                       messages: list) -> list:
+    def __manual_compact(self, client: Anthropic, model: str,
+                         messages: list) -> list:
         # Save full transcript to disk
         os.makedirs(self._config.transcript_dir, exist_ok=True)
         transcript_path = os.path.join(self._config.transcript_dir,

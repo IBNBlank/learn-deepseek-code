@@ -6,198 +6,77 @@
 # Date  : 2026-03-30
 ################################################################
 
-import os, sys
-from anthropic import Anthropic
+import os
+import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agents.utils import API_KEY, BASE_URL, MODEL
-from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-from agents.tools import (
-    BashToolConfig,
-    FileToolConfig,
-    TaskToolConfig,
-    ToolManager,
-)
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_DIR not in sys.path:
+    sys.path.append(REPO_DIR)
+
+from learn_deepseek_code.agent import AgentMain, AgentMainConfig, AgentSubConfig
+from learn_deepseek_code.constants import LOG_DIR
+from learn_deepseek_code.kit import KitAgent, KitAgentConfig, KitBash, KitBashConfig, KitFiles, KitFilesConfig, KitManager
 
 
-def run_subagent(
-    client: Anthropic,
-    prompt: str,
-    agent_config: dict,
-) -> str:
-    tool_manager = agent_config["child_tool_manager"]
-    sub_messages = []
-    append_msg(
-        sub_messages,
-        {
-            "role": "user",
-            "content": prompt
-        },
-        agent_config["log_path"],
-        sub_agent=True,
+def print_answer(history: list) -> None:
+    response_content = history[-1].get("content")
+    if isinstance(response_content, list):
+        for block in response_content:
+            if hasattr(block, "text"):
+                print(f"\n\033[32m[Answer]\033[0m")
+                print(block.text)
+        print()
+
+
+def main() -> int:
+    cur_work_dir = os.getcwd()
+
+    # Child agent: has bash + files, but no `task` (avoid recursive delegation).
+    child_kits = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+    ])
+    child_agent_cfg = AgentSubConfig(
+        system_prompt=(
+            f"You are a coding subagent at {cur_work_dir}. "
+            "Complete the given task, then summarize your findings."),
+        kit_manager=child_kits,
+        log_path=os.path.join(LOG_DIR, "s04_history.sub.md"),
+        cur_work_dir=cur_work_dir,
     )
 
-    response = None
-    for _ in range(30):
-        response = client.messages.create(
-            model=agent_config["model"],
-            system=agent_config["subagent_system_prompt"],
-            messages=sub_messages,
-            tools=tool_manager.tool_specs(),
-            max_tokens=agent_config["max_tokens"],
-        )
-        append_msg(
-            sub_messages,
-            {
-                "role": "assistant",
-                "content": response.content,
-            },
-            agent_config["log_path"],
-            sub_agent=True,
-        )
-        if response.stop_reason != "tool_use":
-            break
+    # Parent agent: has bash + files + task (subagent).
+    parent_kits = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+        KitAgent(KitAgentConfig(sub_agent=child_agent_cfg)),
+    ])
+    agent = AgentMain(
+        AgentMainConfig(
+            system_prompt=(
+                f"You are a coding agent at {cur_work_dir}. "
+                "Use the task tool to delegate exploration or subtasks."),
+            kit_manager=parent_kits,
+            log_path=os.path.join(LOG_DIR, "s04_history.md"),
+            cur_work_dir=cur_work_dir,
+        ))
 
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                print(
-                    f"\033[33m>>> {block.name}\033[0m \033[34m{block.input}\033[0m"
-                )
-                try:
-                    output = tool_manager.run_tool(block.name, block.input)
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(f">> {output}")
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": str(output)
-                })
-        append_msg(sub_messages, {
-            "role": "user",
-            "content": results
-        },
-                   agent_config["log_path"],
-                   sub_agent=True)
-
-    if response is None:
-        return "(no summary)"
-    return "".join(b.text for b in response.content
-                   if hasattr(b, "text")) or "(no summary)"
-
-
-def agent_loop(
-    client: Anthropic,
-    messages: list,
-    agent_config: dict,
-):
-    tool_manager = agent_config["tool_manager"]
-    while True:
-        response = client.messages.create(
-            model=agent_config["model"],
-            system=agent_config["system_prompt"],
-            messages=messages,
-            tools=tool_manager.tool_specs(),
-            max_tokens=agent_config["max_tokens"],
-        )
-        append_msg(messages, {
-            "role": "assistant",
-            "content": response.content
-        }, agent_config["log_path"])
-        if response.stop_reason != "tool_use":
-            divide_log(agent_config["log_path"])
-            return
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                print(
-                    f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
-                )
-                if block.name == "task":
-                    desc = block.input.get("description", "subtask")
-                    print(
-                        f"\033[35m> task ({desc}): {block.input['prompt']}\033[0m"
-                    )
-                try:
-                    output = tool_manager.run_tool(block.name, block.input)
-                except Exception as e:
-                    output = f"Error: {e}"
-                print(output)
-                results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": str(output)
-                })
-        append_msg(messages, {
-            "role": "user",
-            "content": results
-        }, agent_config["log_path"])
-
-
-if __name__ == "__main__":
-    cur_work_dir = os.getcwd()
-    log_path = os.path.join(LOG_DIR, "s04_history.md")
-    fc = FileToolConfig(work_dir=cur_work_dir)
-    child_tools_cfg = {
-        "bash": BashToolConfig(work_dir=cur_work_dir),
-        "read_file": fc,
-        "write_file": fc,
-        "edit_file": fc,
-    }
-    child_tool_manager = ToolManager(child_tools_cfg)
-    agent_config = {
-        "model":
-        MODEL,
-        "max_tokens":
-        16000,
-        "cur_work_dir":
-        cur_work_dir,
-        "log_path":
-        log_path,
-        "child_tool_manager":
-        child_tool_manager,
-        "system_prompt":
-        f"You are a coding agent at {cur_work_dir}. Use the task tool to delegate exploration or subtasks.",
-        "subagent_system_prompt":
-        f"You are a coding subagent at {cur_work_dir}. Complete the given task, then summarize your findings."
-    }
-
-    def _run_task(tool_input: dict) -> str:
-        return run_subagent(
-            client,
-            tool_input["prompt"],
-            agent_config,
-        )
-
-    parent_tool_manager = ToolManager({
-        **child_tools_cfg,
-        "task": TaskToolConfig(run_fn=_run_task),
-    })
-    agent_config["tool_manager"] = parent_tool_manager
-
-    client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
-    history = []
-    init_log(log_path)
+    history: list = []
     try:
         while True:
             try:
                 query = input("\033[36ms04 >> \033[0m")
             except (EOFError, KeyboardInterrupt):
-                break
+                return 0
             if query.strip().lower() in ("q", "exit", ""):
-                break
+                return 0
 
-            append_msg(history, {"role": "user", "content": query}, log_path)
-            agent_loop(client, history, agent_config)
-
-            response_content = history[-1]["content"]
-            if isinstance(response_content, list):
-                for block in response_content:
-                    if hasattr(block, "text"):
-                        print(f"\n\033[32m[Answer]\033[0m")
-                        print(block.text)
-            print()
+            history.append({"role": "user", "content": query})
+            history = agent.agent_loop(history)
+            print_answer(history)
     except KeyboardInterrupt:
-        pass
+        return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

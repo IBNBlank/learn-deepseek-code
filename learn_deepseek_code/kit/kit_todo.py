@@ -62,7 +62,7 @@ class KitTodo(KitBase):
 
     def helpers(self) -> dict[str, Callable[[dict], str]]:
         return {
-            "todo_reminder": self.reminder,
+            "todo_reminder": self.__reminder,
         }
 
     def run(self, tool_input: dict) -> str:
@@ -104,7 +104,7 @@ class KitTodo(KitBase):
         lines.append(f"\n({done}/{len(self.__items)} completed)")
         return "\n".join(lines)
 
-    def reminder(self, input: dict) -> str:
+    def __reminder(self, input: dict) -> str:
         return {
             "type": "text",
             "text": "<reminder>Update your todos.</reminder>"

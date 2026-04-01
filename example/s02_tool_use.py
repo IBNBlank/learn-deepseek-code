@@ -6,28 +6,15 @@
 # Date  : 2026-03-29
 ################################################################
 
-import os
-import sys
+import os, sys
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.append(REPO_DIR)
 
-try:
-    from learn_deepseek_code.agent.agent import Agent, AgentConfig
-    from learn_deepseek_code.constants import LOG_DIR
-    from learn_deepseek_code.kit import (
-        KitBash,
-        KitBashConfig,
-        KitFiles,
-        KitFilesConfig,
-        KitManager,
-    )
-except ModuleNotFoundError as e:
-    missing = getattr(e, "name", None) or str(e)
-    print(f"[error] Missing dependency: {missing}")
-    print("Install deps with: pip install -r requirements.txt")
-    raise
+from learn_deepseek_code.agent import AgentMain, AgentMainConfig
+from learn_deepseek_code.constants import LOG_DIR
+from learn_deepseek_code.kit import KitBash, KitBashConfig, KitFiles, KitFilesConfig, KitManager
 
 
 def print_answer(history: list) -> None:
@@ -46,12 +33,13 @@ if __name__ == "__main__":
         KitBash(KitBashConfig(work_dir=cur_work_dir)),
         KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
     ])
-    agent = Agent(
-        AgentConfig(
+    agent = AgentMain(
+        AgentMainConfig(
             system_prompt=(f"You are a coding agent at {cur_work_dir}. "
                            "Use tools to solve tasks. Act, don't explain."),
             kit_manager=kit_manager,
             log_path=os.path.join(LOG_DIR, "s02_history.md"),
+            cur_work_dir=cur_work_dir,
         ))
 
     history: list = []

@@ -13,23 +13,9 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.append(REPO_DIR)
 
-try:
-    from learn_deepseek_code.agent.agent import Agent, AgentConfig
-    from learn_deepseek_code.constants import LOG_DIR
-    from learn_deepseek_code.kit import (
-        KitBash,
-        KitBashConfig,
-        KitFiles,
-        KitFilesConfig,
-        KitManager,
-        KitTodo,
-        KitTodoConfig,
-    )
-except ModuleNotFoundError as e:
-    missing = getattr(e, "name", None) or str(e)
-    print(f"[error] Missing dependency: {missing}")
-    print("Install deps with: pip install -r requirements.txt")
-    raise
+from learn_deepseek_code.agent import AgentMain, AgentMainConfig
+from learn_deepseek_code.constants import LOG_DIR
+from learn_deepseek_code.kit import KitBash, KitBashConfig, KitFiles, KitFilesConfig, KitManager, KitTodo, KitTodoConfig
 
 
 def print_answer(history: list) -> None:
@@ -49,13 +35,14 @@ def main() -> int:
         KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
         KitTodo(KitTodoConfig()),
     ])
-    agent = Agent(
-        AgentConfig(
+    agent = AgentMain(
+        AgentMainConfig(
             system_prompt=f"""You are a coding agent at {cur_work_dir}.
 Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done.
 Prefer tools over prose.""",
             kit_manager=kit_manager,
             log_path=os.path.join(LOG_DIR, "s03_history.md"),
+            cur_work_dir=cur_work_dir,
         ))
 
     history: list = []
