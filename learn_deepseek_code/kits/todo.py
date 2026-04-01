@@ -6,7 +6,16 @@
 # Date  : 2026-03-30
 ################################################################
 
-from .common import ToolBase
+from dataclasses import dataclass
+
+from typing import Callable
+
+from .base import ToolBase
+
+
+@dataclass
+class TodoToolConfig:
+    pass
 
 
 class TodoManager:
@@ -53,45 +62,50 @@ class TodoManager:
 
 class TodoTool(ToolBase):
 
-    def __init__(self):
+    def __init__(self, config: TodoToolConfig):
+        self._config = config
         self._manager = TodoManager()
 
-    @property
-    def name(self) -> str:
-        return "todo"
-
-    @property
-    def description(self) -> str:
-        return ("Update task list. Track progress on multi-step tasks.")
-
-    @property
-    def input_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {
-                                "type": "string"
-                            },
-                            "text": {
-                                "type": "string"
-                            },
-                            "status": {
-                                "type": "string",
-                                "enum":
-                                ["pending", "in_progress", "completed"]
+    def tool_specs(self) -> list[dict]:
+        return [
+            {
+                "name": "todo",
+                "description":
+                "Update task list. Track progress on multi-step tasks.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string"
+                                    },
+                                    "text": {
+                                        "type": "string"
+                                    },
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pending",
+                                            "in_progress",
+                                            "completed",
+                                        ]
+                                    }
+                                },
+                                "required": ["id", "text", "status"]
                             }
-                        },
-                        "required": ["id", "text", "status"]
-                    }
-                }
-            },
-            "required": ["items"]
-        }
+                        }
+                    },
+                    "required": ["items"]
+                },
+            }
+        ]
 
-    def run(self, tool_input: dict, cur_work_dir: str) -> str:
+    def tool_methods(self) -> dict[str, Callable[[dict], str]]:
+        return {"todo": self.run}
+
+    def run(self, tool_input: dict) -> str:
         return self._manager.update(tool_input["items"])

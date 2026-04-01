@@ -12,7 +12,12 @@ from anthropic import Anthropic
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.utils import API_KEY, BASE_URL, MODEL
 from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-from agents.tools import ToolManager, TaskTool
+from agents.tools import (
+    BashToolConfig,
+    FileToolConfig,
+    TaskToolConfig,
+    ToolManager,
+)
 
 
 def run_subagent(
@@ -32,7 +37,6 @@ def run_subagent(
         sub_agent=True,
     )
 
-    wd = agent_config["cur_work_dir"]
     response = None
     for _ in range(30):
         response = client.messages.create(
@@ -61,7 +65,7 @@ def run_subagent(
                     f"\033[33m>>> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
-                    output = tool_manager.run_tool(block.name, block.input, wd)
+                    output = tool_manager.run_tool(block.name, block.input)
                 except Exception as e:
                     output = f"Error: {e}"
                 print(f">> {output}")
@@ -106,7 +110,6 @@ def agent_loop(
             return
 
         results = []
-        wd = agent_config["cur_work_dir"]
         for block in response.content:
             if block.type == "tool_use":
                 print(
@@ -118,7 +121,7 @@ def agent_loop(
                         f"\033[35m> task ({desc}): {block.input['prompt']}\033[0m"
                     )
                 try:
-                    output = tool_manager.run_tool(block.name, block.input, wd)
+                    output = tool_manager.run_tool(block.name, block.input)
                 except Exception as e:
                     output = f"Error: {e}"
                 print(output)
@@ -136,8 +139,14 @@ def agent_loop(
 if __name__ == "__main__":
     cur_work_dir = os.getcwd()
     log_path = os.path.join(LOG_DIR, "s04_history.md")
-    child_tool_names = ["bash", "read_file", "write_file", "edit_file"]
-    child_tool_manager = ToolManager(child_tool_names)
+    fc = FileToolConfig(work_dir=cur_work_dir)
+    child_tools_cfg = {
+        "bash": BashToolConfig(work_dir=cur_work_dir),
+        "read_file": fc,
+        "write_file": fc,
+        "edit_file": fc,
+    }
+    child_tool_manager = ToolManager(child_tools_cfg)
     agent_config = {
         "model":
         MODEL,
@@ -155,15 +164,17 @@ if __name__ == "__main__":
         f"You are a coding subagent at {cur_work_dir}. Complete the given task, then summarize your findings."
     }
 
-    def _run_task(tool_input: dict, _wd: str) -> str:
+    def _run_task(tool_input: dict) -> str:
         return run_subagent(
             client,
             tool_input["prompt"],
             agent_config,
         )
 
-    task_tool = TaskTool(_run_task)
-    parent_tool_manager = ToolManager(child_tool_names + [task_tool])
+    parent_tool_manager = ToolManager({
+        **child_tools_cfg,
+        "task": TaskToolConfig(run_fn=_run_task),
+    })
     agent_config["tool_manager"] = parent_tool_manager
 
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)

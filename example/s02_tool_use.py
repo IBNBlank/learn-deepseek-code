@@ -12,7 +12,11 @@ from anthropic import Anthropic
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.utils import API_KEY, BASE_URL, MODEL
 from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-from agents.tools import ToolManager
+from agents.tools import (
+    BashToolConfig,
+    FileToolConfig,
+    ToolManager,
+)
 
 
 def agent_loop(
@@ -21,7 +25,6 @@ def agent_loop(
     agent_config: dict,
 ):
     tool_manager = agent_config["tool_manager"]
-    rounds_since_todo = 0
     while True:
         response = client.messages.create(
             model=agent_config["model"],
@@ -39,34 +42,21 @@ def agent_loop(
             return
 
         results = []
-        used_todo = False
-        wd = agent_config["cur_work_dir"]
         for block in response.content:
             if block.type == "tool_use":
                 print(
                     f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
-                    output = tool_manager.run_tool(block.name, block.input, wd)
-                    if block.name == "todo":
-                        used_todo = True
+                    output = tool_manager.run_tool(block.name, block.input)
                 except Exception as e:
                     output = f"Error: {e}"
                 print(output)
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": str(output)
+                    "content": output
                 })
-
-        # remind the agent to update the todos
-        rounds_since_todo = 0 if used_todo else rounds_since_todo + 1
-        if rounds_since_todo >= 3:
-            results.append({
-                "type": "text",
-                "text": "<reminder>Update your todos.</reminder>"
-            })
-
         append_msg(messages, {
             "role": "user",
             "content": results
@@ -75,8 +65,13 @@ def agent_loop(
 
 if __name__ == "__main__":
     cur_work_dir = os.getcwd()
-    tool_manager = ToolManager(
-        ["bash", "read_file", "write_file", "edit_file", "todo"])
+    fc = FileToolConfig(work_dir=cur_work_dir)
+    tool_manager = ToolManager({
+        "bash": BashToolConfig(work_dir=cur_work_dir),
+        "read_file": fc,
+        "write_file": fc,
+        "edit_file": fc,
+    })
     agent_config = {
         "model":
         MODEL,
@@ -85,13 +80,11 @@ if __name__ == "__main__":
         "cur_work_dir":
         cur_work_dir,
         "log_path":
-        os.path.join(LOG_DIR, "s03_history.md"),
+        os.path.join(LOG_DIR, "s02_history.md"),
         "tool_manager":
         tool_manager,
         "system_prompt":
-        f"""You are a coding agent at {cur_work_dir}.
-Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done.
-Prefer tools over prose.""",
+        f"You are a coding agent at {cur_work_dir}. Use tools to solve tasks. Act, don't explain.",
     }
 
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
@@ -100,7 +93,7 @@ Prefer tools over prose.""",
     try:
         while True:
             try:
-                query = input("\033[36ms03 >> \033[0m")
+                query = input("\033[36ms02 >> \033[0m")
             except (EOFError, KeyboardInterrupt):
                 break
             if query.strip().lower() in ("q", "exit", ""):

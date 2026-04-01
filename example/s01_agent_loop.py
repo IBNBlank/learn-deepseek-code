@@ -3,17 +3,16 @@
 ################################################################
 # Copyright 2026 Dong Zhaorui. All rights reserved.
 # Author: Dong Zhaorui 847235539@qq.com
-# Date  : 2026-03-30
+# Date  : 2026-03-29
 ################################################################
 
-import os
-import sys
+import os, sys
 from anthropic import Anthropic
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.utils import API_KEY, BASE_URL, MODEL
 from agents.utils import LOG_DIR, init_log, append_msg, divide_log
-from agents.tools import ToolManager, SkillTool
+from agents.tools import BashToolConfig, ToolManager
 
 
 def agent_loop(
@@ -39,21 +38,20 @@ def agent_loop(
             return
 
         results = []
-        wd = agent_config["cur_work_dir"]
         for block in response.content:
             if block.type == "tool_use":
                 print(
                     f"\033[33m> {block.name}\033[0m \033[34m{block.input}\033[0m"
                 )
                 try:
-                    output = tool_manager.run_tool(block.name, block.input, wd)
+                    output = tool_manager.run_tool(block.name, block.input)
                 except Exception as e:
                     output = f"Error: {e}"
                 print(output)
                 results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "content": str(output)
+                    "content": output
                 })
         append_msg(messages, {
             "role": "user",
@@ -63,9 +61,9 @@ def agent_loop(
 
 if __name__ == "__main__":
     cur_work_dir = os.getcwd()
-    skill_tool = SkillTool()
-    tool_manager = ToolManager(
-        ["bash", "read_file", "write_file", "edit_file", skill_tool])
+    tool_manager = ToolManager({
+        "bash": BashToolConfig(work_dir=cur_work_dir),
+    })
     agent_config = {
         "model":
         MODEL,
@@ -74,15 +72,11 @@ if __name__ == "__main__":
         "cur_work_dir":
         cur_work_dir,
         "log_path":
-        os.path.join(LOG_DIR, "s05_history.md"),
+        os.path.join(LOG_DIR, "s01_history.md"),
         "tool_manager":
         tool_manager,
         "system_prompt":
-        f"""You are a coding agent at {cur_work_dir}.
-Use load_skill to access specialized knowledge before tackling unfamiliar topics.
-
-Skills available:
-{skill_tool.get_system()}""",
+        f"You are a coding agent at {cur_work_dir}. Use bash to solve tasks. Act, don't explain.",
     }
 
     client = Anthropic(api_key=API_KEY, base_url=BASE_URL)
@@ -91,7 +85,7 @@ Skills available:
     try:
         while True:
             try:
-                query = input("\033[36ms05 >> \033[0m")
+                query = input("\033[36ms01 >> \033[0m")
             except (EOFError, KeyboardInterrupt):
                 break
             if query.strip().lower() in ("q", "exit", ""):
