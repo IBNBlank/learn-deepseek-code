@@ -38,26 +38,31 @@ class Agent:
             api_key=self.config.api_key,
             base_url=self.config.base_url,
         )
+        self.__log_util = LogUtil(self.config.log_path, self.config.is_sub)
+        self.__history = []
 
-        self.kit_manager = self.config.kit_manager
-        self.helper_names = self.kit_manager.helper_names()
-        self.compact_flag = "compact_estimate_tokens" in self.helper_names
+        self.__kit_manager = self.config.kit_manager
+        self.__tool_names = self.__kit_manager.tool_names()
 
-        self.log_util = LogUtil(self.config.log_path, self.config.is_sub)
-        self.history = []
+        # todo tool
+        self.__todo_flag = "todo" in self.__tool_names
+        self.__rounds_since_todo = 0
 
     def agent_loop(self, messages: list) -> list:
         while True:
             # get agent response
             response, messages = self.agent_response(messages)
             if response.stop_reason != "tool_use":
-                self.log_util.divide_log()
+                self.__log_util.divide_log()
                 return messages
 
             # call tools
             results = []
+            used_todo = False
             for block in response.content:
                 if block.type == "tool_use":
+                    if block.name == "todo":
+                        used_todo = True
                     results.append({
                         "type":
                         "tool_result",
@@ -66,7 +71,16 @@ class Agent:
                         "content":
                         self.call_tool(block.name, block.input),
                     })
-            self.log_util.append_msg(messages, {
+
+            # todo tool: remind the agent to update the todos
+            if self.__todo_flag:
+                self.__rounds_since_todo = 0 if used_todo else self.__rounds_since_todo + 1
+                if self.__rounds_since_todo >= 3:
+                    results.append(
+                        self.__kit_manager.run_helper("todo_reminder", {}))
+
+            # append the results to the messages
+            self.__log_util.append_msg(messages, {
                 "role": "user",
                 "content": results,
             })
@@ -79,7 +93,7 @@ class Agent:
             tools=self.config.kit_manager.specs(),
             max_tokens=self.config.max_tokens,
         )
-        self.log_util.append_msg(messages, {
+        self.__log_util.append_msg(messages, {
             "role": "assistant",
             "content": response.content
         })
@@ -88,7 +102,7 @@ class Agent:
     def call_tool(self, tool_name: str, tool_input: dict) -> str:
         print(f"\033[33m> {tool_name}\033[0m \033[34m{tool_input}\033[0m")
         try:
-            output = self.kit_manager.run_tool(tool_name, tool_input)
+            output = self.__kit_manager.run_tool(tool_name, tool_input)
         except Exception as e:
             output = f"Error: {e}"
         print(output)

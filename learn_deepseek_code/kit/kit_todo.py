@@ -7,7 +7,7 @@
 ################################################################
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 from .base import KitBase
 
@@ -19,8 +19,9 @@ class KitTodoConfig:
 
 class KitTodo(KitBase):
 
-    def __init__(self):
-        self._items: list[dict[str, str]] = []
+    def __init__(self, config: Optional[KitTodoConfig] = None):
+        self.__config = config or KitTodoConfig()
+        self.__items: list[dict[str, str]] = []
 
     def specs(self) -> list[dict]:
         return [{
@@ -65,9 +66,9 @@ class KitTodo(KitBase):
         }
 
     def run(self, tool_input: dict) -> str:
-        return self._update(tool_input["items"])
+        return self.__update(tool_input["items"])
 
-    def _update(self, items: list) -> str:
+    def __update(self, items: list) -> str:
         if len(items) > 20:
             raise ValueError("Max 20 todos allowed")
         validated: list[dict[str, str]] = []
@@ -85,25 +86,25 @@ class KitTodo(KitBase):
             validated.append({"id": item_id, "text": text, "status": status})
         if in_progress_count > 1:
             raise ValueError("Only one task can be in_progress at a time")
-        self._items = validated
-        return self._render()
+        self.__items = validated
+        return self.__render()
 
-    def _render(self) -> str:
-        if not self._items:
+    def __render(self) -> str:
+        if not self.__items:
             return "No todos."
         lines: list[str] = []
-        for item in self._items:
+        for item in self.__items:
             marker = {
                 "pending": "[ ]",
                 "in_progress": "[>]",
                 "completed": "[x]"
             }[item["status"]]
             lines.append(f"{marker} #{item['id']}: {item['text']}")
-        done = sum(1 for t in self._items if t["status"] == "completed")
-        lines.append(f"\n({done}/{len(self._items)} completed)")
+        done = sum(1 for t in self.__items if t["status"] == "completed")
+        lines.append(f"\n({done}/{len(self.__items)} completed)")
         return "\n".join(lines)
 
-    def reminder(self) -> str:
+    def reminder(self, input: dict) -> str:
         return {
             "type": "text",
             "text": "<reminder>Update your todos.</reminder>"

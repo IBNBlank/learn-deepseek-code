@@ -35,28 +35,28 @@ class KitManager:
     """Compose multiple KitBase instances into one runnable tool-set."""
 
     def __init__(self, kits: Iterable[KitBase]):
-        self._kits = list(kits)
-        self._specs = self.__merge_specs(self._kits)
-        self._tools = self.__merge_tools(self._kits)
-        self._helpers = self.__merge_helpers(self._kits)
+        self.__kits = list(kits)
+        self.__specs = self.__merge_specs(self.__kits)
+        self.__tools = self.__merge_tools(self.__kits)
+        self.__helpers = self.__merge_helpers(self.__kits)
 
     def specs(self) -> list[dict]:
-        return self._specs
+        return self.__specs
 
     def tool_names(self) -> list[str]:
-        return list(self._tools.keys())
+        return list(self.__tools.keys())
 
     def helper_names(self) -> list[str]:
-        return list(self._helpers.keys())
+        return list(self.__helpers.keys())
 
     def run_helper(self, helper_name: str, input: dict) -> str:
-        fn = self._helpers.get(helper_name)
+        fn = self.__helpers.get(helper_name)
         if fn is None:
             return f"Unknown helper: {helper_name}"
         return fn(input)
 
     def run_tool(self, tool_name: str, input: dict) -> str:
-        fn = self._tools.get(tool_name)
+        fn = self.__tools.get(tool_name)
         if fn is None:
             return f"Unknown tool: {tool_name}"
         return fn(input)
