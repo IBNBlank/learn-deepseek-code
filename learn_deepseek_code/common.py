@@ -26,3 +26,16 @@ with open(f"{REPO_DIR}/api_key", "r") as f:
     API_KEY = f.read().strip()
 BASE_URL = "https://api.deepseek.com/anthropic"
 MODEL = "deepseek-chat"
+
+
+########################################################
+# utils
+########################################################
+def print_answer(history: list) -> None:
+    response_content = history[-1].get("content")
+    if isinstance(response_content, list):
+        for block in response_content:
+            if hasattr(block, "text"):
+                print(f"\n\033[32m[Answer]\033[0m")
+                print(block.text)
+        print()

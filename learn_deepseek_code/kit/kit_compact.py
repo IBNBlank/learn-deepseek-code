@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 from anthropic import Anthropic
 
 from .base import KitBase
-from ..constants import TRANSCRIPT_DIR
+from ..common import TRANSCRIPT_DIR
 
 
 @dataclass
@@ -42,8 +42,10 @@ class KitCompact(KitBase):
     """
 
     def __init__(self, config: Optional[KitCompactConfig] = None):
-        self._config = config or KitCompactConfig()
-        self._enc = tiktoken.get_encoding("cl100k_base")
+        self.__config = config or KitCompactConfig()
+        self.__enc = tiktoken.get_encoding("cl100k_base")
+        self.__client = None
+        self.__model = None
 
     def specs(self) -> list[dict]:
         return [{
@@ -68,6 +70,8 @@ class KitCompact(KitBase):
 
     def helpers(self) -> dict[str, Callable[[dict], str]]:
         return {
+            "compact_set_client": self.__set_client,
+            "compact_set_model": self.__set_model,
             "compact_tool_compact": self.__tool_compact,
             "compact_auto_compact": self.__auto_compact,
             "compact_manual_compact": self.__manual_compact,
@@ -77,8 +81,9 @@ class KitCompact(KitBase):
         return "Compressing..."
 
     # -- Layer 1: micro_compact (tool_compact) --
-    def __tool_compact(self, messages: list) -> list:
+    def __tool_compact(self, helper_input: dict) -> list:
         # Collect (msg_index, part_index, tool_result_dict) for all tool_result entries
+        messages = helper_input["messages"]
         tool_results = []
         for msg_idx, msg in enumerate(messages):
             if msg["role"] == "user" and isinstance(msg.get("content"), list):
@@ -86,7 +91,7 @@ class KitCompact(KitBase):
                     if isinstance(part,
                                   dict) and part.get("type") == "tool_result":
                         tool_results.append((msg_idx, part_idx, part))
-        if len(tool_results) <= self._config.keep_recent:
+        if len(tool_results) <= self.__config.keep_recent:
             return messages
         # Find tool_name for each result by matching tool_use_id in prior assistant messages
         tool_name_map = {}
@@ -99,31 +104,32 @@ class KitCompact(KitBase):
                             tool_name_map[block.id] = block.name
         # Clear old results (keep last KEEP_RECENT). Preserve read_file outputs because
         # they are reference material; compacting them forces the agent to re-read files.
-        to_clear = tool_results[:-self._config.keep_recent]
+        to_clear = tool_results[:-self.__config.keep_recent]
         for _, _, result in to_clear:
             if not isinstance(result.get("content"), str) or len(
                     result["content"]) <= 100:
                 continue
             tool_id = result.get("tool_use_id", "")
             tool_name = tool_name_map.get(tool_id, "unknown")
-            if tool_name in self._config.preserve_result_tools:
+            if tool_name in self.__config.preserve_result_tools:
                 continue
             result["content"] = f"[Previous: used {tool_name}]"
         return messages
 
     # -- Layer 2: auto_compact (token check + agent_compact) --
-    def __auto_compact(self, client: Anthropic, model: str,
-                       messages: list) -> list:
-        if self.__estimate_tokens(messages) > self._config.token_threshold:
-            return self.manual_compact(client, model, messages)
+    def __auto_compact(self, helper_input: dict) -> list:
+        messages = helper_input["messages"]
+        if self.__estimate_tokens(messages) > self.__config.token_threshold:
+            print("[auto_compact triggered]")
+            return self.__manual_compact({"messages": messages})
         return messages
 
     # -- Layer 3: manual_compact (angent call + agent tool) --
-    def __manual_compact(self, client: Anthropic, model: str,
-                         messages: list) -> list:
+    def __manual_compact(self, helper_input: dict) -> list:
+        messages = helper_input["messages"]
         # Save full transcript to disk
-        os.makedirs(self._config.transcript_dir, exist_ok=True)
-        transcript_path = os.path.join(self._config.transcript_dir,
+        os.makedirs(self.__config.transcript_dir, exist_ok=True)
+        transcript_path = os.path.join(self.__config.transcript_dir,
                                        f"transcript_{int(time.time())}.jsonl")
         with open(transcript_path, "w") as f:
             for msg in messages:
@@ -131,9 +137,9 @@ class KitCompact(KitBase):
         print(f"[transcript saved: {transcript_path}]")
         # Ask LLM to summarize
         conversation_text = json.dumps(
-            messages, default=str)[-self._config.conversation_max_chars:]
-        response = client.messages.create(
-            model=model,
+            messages, default=str)[-self.__config.conversation_max_chars:]
+        response = self.__client.messages.create(
+            model=self.__model,
             messages=[{
                 "role":
                 "user",
@@ -143,7 +149,7 @@ class KitCompact(KitBase):
                 "Be concise but preserve critical details.\n\n" +
                 conversation_text
             }],
-            max_tokens=self._config.summary_max_tokens,
+            max_tokens=self.__config.summary_max_tokens,
         )
         summary = response.content[0].text
         # Replace all messages with compressed summary
@@ -160,13 +166,27 @@ class KitCompact(KitBase):
         """
         Prefer `tiktoken` when available; otherwise use a rough heuristic.
         """
-        if self._enc is None:
-            return len(str(messages)) // 4
         total = 0
         for m in messages:
             content = m.get("content", "")
             if isinstance(content, str):
-                total += len(self._enc.encode(content))
+                total += len(self.__enc.encode(content))
             else:
-                total += len(self._enc.encode(str(content)))
+                total += len(self.__enc.encode(str(content)))
         return total
+
+    def __set_client(self, helper_input: dict):
+        """
+        Helper hook (not a model tool): inject the parent's Anthropic client.
+        Called via KitManager.run_helper("task_set_client", {"client": client}).
+        """
+        client = helper_input.get("client")
+        self.__client = client
+
+    def __set_model(self, helper_input: dict):
+        """
+        Helper hook (not a model tool): inject the parent's model.
+        Called via KitManager.run_helper("task_set_model", {"model": model}).
+        """
+        model = helper_input.get("model")
+        self.__model = model

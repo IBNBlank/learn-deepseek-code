@@ -11,7 +11,7 @@ from anthropic import Anthropic
 from anthropic.types import Message
 from dataclasses import dataclass
 
-from ..constants import API_KEY, BASE_URL, MODEL
+from ..common import API_KEY, BASE_URL, MODEL
 from ..kit.base import KitManager
 from .log_util import LogUtil
 
@@ -52,8 +52,21 @@ class AgentMain:
         self.__kit_manager.run_helper("task_set_client",
                                       {"client": self.client})
 
+        # compact tool
+        self.__compact_flag = "compact" in self.__tool_names
+        self.__kit_manager.run_helper("compact_set_client",
+                                      {"client": self.client})
+        self.__kit_manager.run_helper("compact_set_model",
+                                      {"model": self.config.model})
+
     def agent_loop(self, messages: list) -> list:
         while True:
+            if self.__compact_flag:
+                messages = self.__kit_manager.run_helper(
+                    "compact_tool_compact", {"messages": messages})
+                messages = self.__kit_manager.run_helper(
+                    "compact_auto_compact", {"messages": messages})
+
             # get agent response
             response, messages = self.agent_response(messages)
             if response.stop_reason != "tool_use":
@@ -63,10 +76,13 @@ class AgentMain:
             # call tools
             results = []
             used_todo = False
+            manual_compact = False
             for block in response.content:
                 if block.type == "tool_use":
                     if block.name == "todo":
                         used_todo = True
+                    if block.name == "compact":
+                        manual_compact = True
                     results.append({
                         "type":
                         "tool_result",
@@ -88,6 +104,12 @@ class AgentMain:
                 "role": "user",
                 "content": results,
             })
+
+            # compact tool: manual compact
+            if self.__compact_flag and manual_compact:
+                print("[manual_compact triggered]")
+                messages = self.__kit_manager.run_helper(
+                    "compact_manual_compact", {"messages": messages})
 
     def agent_response(self, messages: list) -> tuple[Message, list]:
         response = self.client.messages.create(

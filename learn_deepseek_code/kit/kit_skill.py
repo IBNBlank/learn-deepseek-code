@@ -12,7 +12,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from ..constants import SKILLS_DIR
+from ..common import SKILLS_DIR
 from .base import KitBase
 
 

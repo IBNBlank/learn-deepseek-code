@@ -6,26 +6,22 @@
 # Date  : 2026-03-30
 ################################################################
 
-import os
-import sys
+import os, sys
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.append(REPO_DIR)
 
-from learn_deepseek_code.agent import AgentMain, AgentMainConfig, AgentSubConfig
-from learn_deepseek_code.constants import LOG_DIR
-from learn_deepseek_code.kit import KitAgent, KitAgentConfig, KitBash, KitBashConfig, KitFiles, KitFilesConfig, KitManager
+from learn_deepseek_code.common import LOG_DIR
+from learn_deepseek_code.common import print_answer
 
+from learn_deepseek_code.agent import AgentMain, AgentMainConfig
+from learn_deepseek_code.agent import AgentSubConfig
 
-def print_answer(history: list) -> None:
-    response_content = history[-1].get("content")
-    if isinstance(response_content, list):
-        for block in response_content:
-            if hasattr(block, "text"):
-                print(f"\n\033[32m[Answer]\033[0m")
-                print(block.text)
-        print()
+from learn_deepseek_code.kit import KitManager
+from learn_deepseek_code.kit import KitBash, KitBashConfig
+from learn_deepseek_code.kit import KitFiles, KitFilesConfig
+from learn_deepseek_code.kit import KitAgent, KitAgentConfig
 
 
 def main() -> int:
