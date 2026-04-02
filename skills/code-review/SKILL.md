@@ -5,7 +5,7 @@ description: Perform thorough code reviews with security, performance, and maint
 
 # Code Review Skill
 
-You now have expertise in conducting comprehensive code reviews. Follow this structured approach:
+You now have expertise in conducting comprehensive code reviews. Follow this structured approach and prefer fast, repo-wide searches with `rg` (ripgrep).
 
 ## Review Checklist
 
@@ -24,7 +24,7 @@ Check for:
 npm audit                    # Node.js
 pip-audit                    # Python
 cargo audit                  # Rust
-grep -r "password\|secret\|api_key" --include="*.py" --include="*.js"
+rg -n "password|secret|api[_-]?key|token" --glob="*.py" --glob="*.js"
 ```
 
 ### 2. Correctness
@@ -135,8 +135,8 @@ git diff HEAD~5 --stat
 git log --oneline -10
 
 # Find potential issues
-grep -rn "TODO\|FIXME\|HACK\|XXX" .
-grep -rn "password\|secret\|token" . --include="*.py"
+rg -n "TODO|FIXME|HACK|XXX" .
+rg -n "password|secret|token|api[_-]?key" . --glob="*.py"
 
 # Check complexity (Python)
 pip install radon && radon cc . -a

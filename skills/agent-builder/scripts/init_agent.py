@@ -1,278 +1,410 @@
 #!/usr/bin/env python3
+# -*- coding:utf-8 -*-
 """
-Agent Scaffold Script - Create a new agent project with best practices.
+Hex Claw Agent Scaffold - 生成基于hex_claw框架的代理脚本。
 
 Usage:
-    python init_agent.py <agent-name> [--level 0-4] [--path <output-dir>]
+    python init_agent.py <agent-name> [--level 1-6|full] [--path <output-dir>]
 
 Examples:
-    python init_agent.py my-agent                 # Level 1 (4 tools)
-    python init_agent.py my-agent --level 0      # Minimal (bash only)
-    python init_agent.py my-agent --level 2      # With TodoWrite
-    python init_agent.py my-agent --path ./bots  # Custom output directory
+    python init_agent.py my_bot                    # Level 2 (bash + files)
+    python init_agent.py my_bot --level 1          # Level 1 (bash only)
+    python init_agent.py my_bot --level 4          # Level 4 (+ subagent)
+    python init_agent.py my_bot --level full       # All features
+    python init_agent.py my_bot --path ./agents    # Custom output directory
 """
 
 import argparse
 import sys
+import textwrap
 from pathlib import Path
 
-# Agent templates for each level
-TEMPLATES = {
-    0: '''#!/usr/bin/env python3
-"""
-Level 0 Agent - Bash is All You Need (~50 lines)
+HEADER = '''\
+#!/usr/bin/env python3
+# -*- coding:utf-8 -*-
 
-Core insight: One tool (bash) can do everything.
-Subagents via self-recursion: python {name}.py "subtask"
-"""
+import os, sys
 
-from anthropic import Anthropic
-from dotenv import load_dotenv
-import subprocess
-import os
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_DIR not in sys.path:
+    sys.path.append(REPO_DIR)
 
-load_dotenv()
+from hex_claw.common import LOG_DIR
+from hex_claw.common import print_answer
+'''
 
-client = Anthropic(
-    api_key=os.getenv("ANTHROPIC_API_KEY"),
-    base_url=os.getenv("ANTHROPIC_BASE_URL")
-)
-MODEL = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
-
-SYSTEM = """You are a coding agent. Use bash for everything:
-- Read: cat, grep, find, ls
-- Write: echo 'content' > file
-- Subagent: python {name}.py "subtask"
-"""
-
-TOOL = [{{
-    "name": "bash",
-    "description": "Execute shell command",
-    "input_schema": {{"type": "object", "properties": {{"command": {{"type": "string"}}}}, "required": ["command"]}}
-}}]
-
-def run(prompt, history=[]):
-    history.append({{"role": "user", "content": prompt}})
-    while True:
-        r = client.messages.create(model=MODEL, system=SYSTEM, messages=history, tools=TOOL, max_tokens=8000)
-        history.append({{"role": "assistant", "content": r.content}})
-        if r.stop_reason != "tool_use":
-            return "".join(b.text for b in r.content if hasattr(b, "text"))
-        results = []
-        for b in r.content:
-            if b.type == "tool_use":
-                print(f"> {{b.input['command']}}")
-                try:
-                    out = subprocess.run(b.input["command"], shell=True, capture_output=True, text=True, timeout=60)
-                    output = (out.stdout + out.stderr).strip() or "(empty)"
-                except Exception as e:
-                    output = f"Error: {{e}}"
-                results.append({{"type": "tool_result", "tool_use_id": b.id, "content": output[:50000]}})
-        history.append({{"role": "user", "content": results}})
-
-if __name__ == "__main__":
-    h = []
-    print("{name} - Level 0 Agent\\nType 'q' to quit.\\n")
-    while (q := input(">> ").strip()) not in ("q", "quit", ""):
-        print(run(q, h), "\\n")
-''',
-
-    1: '''#!/usr/bin/env python3
-"""
-Level 1 Agent - Model as Agent (~200 lines)
-
-Core insight: 4 tools cover 90% of coding tasks.
-The model IS the agent. Code just runs the loop.
-"""
-
-from anthropic import Anthropic
-from dotenv import load_dotenv
-from pathlib import Path
-import subprocess
-import os
-
-load_dotenv()
-
-client = Anthropic(
-    api_key=os.getenv("ANTHROPIC_API_KEY"),
-    base_url=os.getenv("ANTHROPIC_BASE_URL")
-)
-MODEL = os.getenv("MODEL_NAME", "claude-sonnet-4-20250514")
-WORKDIR = Path.cwd()
-
-SYSTEM = f"""You are a coding agent at {{WORKDIR}}.
-
-Rules:
-- Prefer tools over prose. Act, don't just explain.
-- Never invent file paths. Use ls/find first if unsure.
-- Make minimal changes. Don't over-engineer.
-- After finishing, summarize what changed."""
-
-TOOLS = [
-    {{"name": "bash", "description": "Run shell command",
-     "input_schema": {{"type": "object", "properties": {{"command": {{"type": "string"}}}}, "required": ["command"]}}}},
-    {{"name": "read_file", "description": "Read file contents",
-     "input_schema": {{"type": "object", "properties": {{"path": {{"type": "string"}}}}, "required": ["path"]}}}},
-    {{"name": "write_file", "description": "Write content to file",
-     "input_schema": {{"type": "object", "properties": {{"path": {{"type": "string"}}, "content": {{"type": "string"}}}}, "required": ["path", "content"]}}}},
-    {{"name": "edit_file", "description": "Replace exact text in file",
-     "input_schema": {{"type": "object", "properties": {{"path": {{"type": "string"}}, "old_text": {{"type": "string"}}, "new_text": {{"type": "string"}}}}, "required": ["path", "old_text", "new_text"]}}}},
-]
-
-def safe_path(p: str) -> Path:
-    """Prevent path escape attacks."""
-    path = (WORKDIR / p).resolve()
-    if not path.is_relative_to(WORKDIR):
-        raise ValueError(f"Path escapes workspace: {{p}}")
-    return path
-
-def execute(name: str, args: dict) -> str:
-    """Execute a tool and return result."""
-    if name == "bash":
-        dangerous = ["rm -rf /", "sudo", "shutdown", "> /dev/"]
-        if any(d in args["command"] for d in dangerous):
-            return "Error: Dangerous command blocked"
-        try:
-            r = subprocess.run(args["command"], shell=True, cwd=WORKDIR, capture_output=True, text=True, timeout=60)
-            return (r.stdout + r.stderr).strip()[:50000] or "(empty)"
-        except subprocess.TimeoutExpired:
-            return "Error: Timeout (60s)"
-        except Exception as e:
-            return f"Error: {{e}}"
-
-    if name == "read_file":
-        try:
-            return safe_path(args["path"]).read_text()[:50000]
-        except Exception as e:
-            return f"Error: {{e}}"
-
-    if name == "write_file":
-        try:
-            p = safe_path(args["path"])
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(args["content"])
-            return f"Wrote {{len(args['content'])}} bytes to {{args['path']}}"
-        except Exception as e:
-            return f"Error: {{e}}"
-
-    if name == "edit_file":
-        try:
-            p = safe_path(args["path"])
-            content = p.read_text()
-            if args["old_text"] not in content:
-                return f"Error: Text not found in {{args['path']}}"
-            p.write_text(content.replace(args["old_text"], args["new_text"], 1))
-            return f"Edited {{args['path']}}"
-        except Exception as e:
-            return f"Error: {{e}}"
-
-    return f"Unknown tool: {{name}}"
-
-def agent(prompt: str, history: list = None) -> str:
-    """Run the agent loop."""
-    if history is None:
-        history = []
-    history.append({{"role": "user", "content": prompt}})
-
-    while True:
-        response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=history, tools=TOOLS, max_tokens=8000
-        )
-        history.append({{"role": "assistant", "content": response.content}})
-
-        if response.stop_reason != "tool_use":
-            return "".join(b.text for b in response.content if hasattr(b, "text"))
-
-        results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                print(f"> {{block.name}}: {{str(block.input)[:100]}}")
-                output = execute(block.name, block.input)
-                print(f"  {{output[:100]}}...")
-                results.append({{"type": "tool_result", "tool_use_id": block.id, "content": output}})
-        history.append({{"role": "user", "content": results}})
-
-if __name__ == "__main__":
-    print(f"{name} - Level 1 Agent at {{WORKDIR}}")
-    print("Type 'q' to quit.\\n")
-    h = []
-    while True:
-        try:
-            query = input(">> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            break
-        if query in ("q", "quit", "exit", ""):
-            break
-        print(agent(query, h), "\\n")
-''',
+LEVEL_CONFIGS = {
+    1: {
+        "desc": "L1 - Agent Loop (bash only)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+        ],
+        "kits": [
+            "KitBash(KitBashConfig(work_dir=cur_work_dir)),",
+        ],
+        "system_prompt": (
+            'f"You are a coding agent at {cur_work_dir}. "\n'
+            '                           "Use bash to solve tasks. Act, don\'t explain."'
+        ),
+        "extra_setup": "",
+    },
+    2: {
+        "desc": "L2 - Tool Use (bash + files)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+        ],
+        "kits": [
+            "KitBash(KitBashConfig(work_dir=cur_work_dir)),",
+            "KitFiles(KitFilesConfig(work_dir=cur_work_dir)),",
+        ],
+        "system_prompt": (
+            'f"You are a coding agent at {cur_work_dir}. "\n'
+            '                           "Use tools to solve tasks. Act, don\'t explain."'
+        ),
+        "extra_setup": "",
+    },
+    3: {
+        "desc": "L3 - Todo Write (bash + files + todo)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+            "from hex_claw.kit import KitTodo, KitTodoConfig",
+        ],
+        "kits": [
+            "KitBash(KitBashConfig(work_dir=cur_work_dir)),",
+            "KitFiles(KitFilesConfig(work_dir=cur_work_dir)),",
+            "KitTodo(KitTodoConfig()),",
+        ],
+        "system_prompt": (
+            'f"""You are a coding agent at {cur_work_dir}.\n'
+            'Use the todo tool to plan multi-step tasks. '
+            'Mark in_progress before starting, completed when done.\n'
+            'Prefer tools over prose."""'
+        ),
+        "extra_setup": "",
+    },
+    4: {
+        "desc": "L4 - Subagent (bash + files + subagent)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "from hex_claw.agent import AgentSubConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+            "from hex_claw.kit import KitAgent, KitAgentConfig",
+        ],
+        "kits": None,  # special handling
+        "system_prompt": (
+            'f"You are a coding agent at {cur_work_dir}. "\n'
+            '                           "Use the task tool to delegate exploration or subtasks."'
+        ),
+        "extra_setup": "subagent",
+    },
+    5: {
+        "desc": "L5 - Skill Loading (bash + files + skill)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+            "from hex_claw.kit import KitSkill, KitSkillConfig",
+        ],
+        "kits": [
+            "KitBash(KitBashConfig(work_dir=cur_work_dir)),",
+            "KitFiles(KitFilesConfig(work_dir=cur_work_dir)),",
+            "KitSkill(KitSkillConfig()),",
+        ],
+        "system_prompt": "skill",  # special handling
+        "extra_setup": "",
+    },
+    6: {
+        "desc": "L6 - Context Compact (bash + files + compact)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+            "from hex_claw.kit import KitCompact, KitCompactConfig",
+        ],
+        "kits": [
+            "KitBash(KitBashConfig(work_dir=cur_work_dir)),",
+            "KitFiles(KitFilesConfig(work_dir=cur_work_dir)),",
+            "KitCompact(KitCompactConfig()),",
+        ],
+        "system_prompt": (
+            'f"You are a coding agent at {cur_work_dir}. '
+            'Use tools to solve tasks."'
+        ),
+        "extra_setup": "",
+    },
+    "full": {
+        "desc": "Full Agent (all features)",
+        "imports": [
+            "from hex_claw.agent import AgentMain, AgentMainConfig",
+            "from hex_claw.agent import AgentSubConfig",
+            "",
+            "from hex_claw.kit import KitManager",
+            "from hex_claw.kit import KitBash, KitBashConfig",
+            "from hex_claw.kit import KitFiles, KitFilesConfig",
+            "from hex_claw.kit import KitTodo, KitTodoConfig",
+            "from hex_claw.kit import KitSkill, KitSkillConfig",
+            "from hex_claw.kit import KitAgent, KitAgentConfig",
+            "from hex_claw.kit import KitCompact, KitCompactConfig",
+        ],
+        "kits": None,  # special handling
+        "system_prompt": (
+            'f"You are a coding agent at {cur_work_dir}. "\n'
+            '                           "Use the task tool to delegate exploration or subtasks."'
+        ),
+        "extra_setup": "full",
+    },
 }
 
-ENV_TEMPLATE = '''# API Configuration
-ANTHROPIC_API_KEY=sk-xxx
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-MODEL_NAME=claude-sonnet-4-20250514
+
+def build_simple_main(name: str, cfg: dict) -> str:
+    """Generate main() for simple agents (L1-L3, L5-L6)."""
+    kit_lines = "\n        ".join(cfg["kits"])
+    is_skill = cfg["system_prompt"] == "skill"
+
+    lines = []
+    lines.append("def main() -> int:")
+    lines.append("    cur_work_dir = os.getcwd()")
+    lines.append("    kit_manager = KitManager([")
+    lines.append(f"        {kit_lines}")
+    lines.append("    ])")
+
+    if is_skill:
+        lines.append('    agent = AgentMain(')
+        lines.append('        AgentMainConfig(')
+        lines.append('            system_prompt=f"""You are a coding agent at {cur_work_dir}.')
+        lines.append('Use load_skill to access specialized knowledge before tackling unfamiliar topics.')
+        lines.append('')
+        lines.append('Skills available:')
+        lines.append('{kit_manager.run_helper("skill_get_system", {})}""",')
+    else:
+        lines.append("    agent = AgentMain(")
+        lines.append("        AgentMainConfig(")
+        lines.append(f"            system_prompt=({cfg['system_prompt']}),")
+
+    lines.append("            kit_manager=kit_manager,")
+    lines.append(f'            log_path=os.path.join(LOG_DIR, "{name}_history.md"),')
+    lines.append("            cur_work_dir=cur_work_dir,")
+    lines.append("        ))")
+    lines.append("")
+    lines.append("    history: list = []")
+    lines.append("    try:")
+    lines.append("        while True:")
+    lines.append("            try:")
+    lines.append(f'                query = input("\\033[36m{name} >> \\033[0m")')
+    lines.append("            except (EOFError, KeyboardInterrupt):")
+    lines.append("                return 0")
+    lines.append('            if query.strip().lower() in ("q", "exit", ""):')
+    lines.append("                return 0")
+    lines.append("")
+    lines.append('            history.append({"role": "user", "content": query})')
+    lines.append("            history = agent.agent_loop(history)")
+    lines.append("            print_answer(history)")
+    lines.append("    except KeyboardInterrupt:")
+    lines.append("        return 0")
+    return "\n".join(lines)
+
+
+def build_subagent_main(name: str) -> str:
+    """Generate main() for L4 (subagent pattern)."""
+    return textwrap.dedent(f'''\
+def main() -> int:
+    cur_work_dir = os.getcwd()
+
+    child_kits = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+    ])
+    child_agent_cfg = AgentSubConfig(
+        system_prompt=(
+            f"You are a coding subagent at {{cur_work_dir}}. "
+            "Complete the given task, then summarize your findings."),
+        kit_manager=child_kits,
+        log_path=os.path.join(LOG_DIR, "{name}_history.sub.md"),
+        cur_work_dir=cur_work_dir,
+    )
+
+    parent_kits = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+        KitAgent(KitAgentConfig(sub_agent=child_agent_cfg)),
+    ])
+    agent = AgentMain(
+        AgentMainConfig(
+            system_prompt=(
+                f"You are a coding agent at {{cur_work_dir}}. "
+                "Use the task tool to delegate exploration or subtasks."),
+            kit_manager=parent_kits,
+            log_path=os.path.join(LOG_DIR, "{name}_history.md"),
+            cur_work_dir=cur_work_dir,
+        ))
+
+    history: list = []
+    try:
+        while True:
+            try:
+                query = input("\\033[36m{name} >> \\033[0m")
+            except (EOFError, KeyboardInterrupt):
+                return 0
+            if query.strip().lower() in ("q", "exit", ""):
+                return 0
+
+            history.append({{"role": "user", "content": query}})
+            history = agent.agent_loop(history)
+            print_answer(history)
+    except KeyboardInterrupt:
+        return 0''')
+
+
+def build_full_main(name: str) -> str:
+    """Generate main() for full agent."""
+    return textwrap.dedent(f'''\
+def main() -> int:
+    cur_work_dir = os.getcwd()
+
+    child_kits = KitManager([
+        KitBash(KitBashConfig(work_dir=cur_work_dir)),
+        KitFiles(KitFilesConfig(work_dir=cur_work_dir)),
+        KitTodo(KitTodoConfig()),
+        KitSkill(KitSkillConfig()),
+    ])
+    child_agent_cfg = AgentSubConfig(
+        system_prompt=(
+            f"You are a coding subagent at {{cur_work_dir}}. "
+            "Complete the given task, then summarize your findings."),
+        kit_manager=child_kits,
+        log_path=os.path.join(LOG_DIR, "{name}_history.sub.md"),
+        cur_work_dir=cur_work_dir,
+    )
+    parent_kits = KitManager([
+        KitAgent(KitAgentConfig(sub_agent=child_agent_cfg)),
+        KitCompact(KitCompactConfig()),
+    ])
+    agent = AgentMain(
+        AgentMainConfig(
+            system_prompt=(
+                f"You are a coding agent at {{cur_work_dir}}. "
+                "Use the task tool to delegate exploration or subtasks."),
+            kit_manager=parent_kits,
+            log_path=os.path.join(LOG_DIR, "{name}_history.md"),
+            cur_work_dir=cur_work_dir,
+        ))
+
+    history: list = []
+    try:
+        while True:
+            try:
+                query = input("\\033[36m{name} >> \\033[0m")
+            except (EOFError, KeyboardInterrupt):
+                return 0
+            if query.strip().lower() in ("q", "exit", ""):
+                return 0
+
+            history.append({{"role": "user", "content": query}})
+            history = agent.agent_loop(history)
+            print_answer(history)
+    except KeyboardInterrupt:
+        return 0''')
+
+
+ENTRY = '''
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 '''
 
 
-def create_agent(name: str, level: int, output_dir: Path):
-    """Create a new agent project."""
-    # Validate level
-    if level not in TEMPLATES and level not in (2, 3, 4):
-        print(f"Error: Level {level} not yet implemented in scaffold.")
-        print("Available levels: 0 (minimal), 1 (4 tools)")
-        print("For levels 2-4, copy from mini-claude-code repository.")
+def create_agent(name: str, level, output_dir: Path):
+    """Create a new hex_claw agent script."""
+    cfg = LEVEL_CONFIGS.get(level)
+    if cfg is None:
+        print(f"Error: Unknown level '{level}'.")
+        print(f"Available: {', '.join(str(k) for k in LEVEL_CONFIGS)}")
         sys.exit(1)
 
-    # Create output directory
-    agent_dir = output_dir / name
-    agent_dir.mkdir(parents=True, exist_ok=True)
+    agent_file = output_dir / f"{name}.py"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write agent file
-    agent_file = agent_dir / f"{name}.py"
-    template = TEMPLATES.get(level, TEMPLATES[1])
-    agent_file.write_text(template.format(name=name))
+    imports = "\n".join(cfg["imports"])
+
+    if cfg["extra_setup"] == "subagent":
+        main_body = build_subagent_main(name)
+    elif cfg["extra_setup"] == "full":
+        main_body = build_full_main(name)
+    else:
+        main_body = build_simple_main(name, cfg)
+
+    content = f"{HEADER}\n{imports}\n\n\n{main_body}\n{ENTRY}"
+    agent_file.write_text(content)
     print(f"Created: {agent_file}")
-
-    # Write .env.example
-    env_file = agent_dir / ".env.example"
-    env_file.write_text(ENV_TEMPLATE)
-    print(f"Created: {env_file}")
-
-    # Write .gitignore
-    gitignore = agent_dir / ".gitignore"
-    gitignore.write_text(".env\n__pycache__/\n*.pyc\n")
-    print(f"Created: {gitignore}")
-
-    print(f"\nAgent '{name}' created at {agent_dir}")
-    print(f"\nNext steps:")
-    print(f"  1. cd {agent_dir}")
-    print(f"  2. cp .env.example .env")
-    print(f"  3. Edit .env with your API key")
-    print(f"  4. pip install anthropic python-dotenv")
-    print(f"  5. python {name}.py")
+    print(f"  Level: {cfg['desc']}")
+    print(f"\nUsage:")
+    print(f"  cd {output_dir.resolve().parent}")
+    print(f"  python {output_dir.name}/{name}.py")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Scaffold a new AI coding agent project",
+        description="生成基于hex_claw框架的AI代理脚本",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=textwrap.dedent("""\
 Levels:
-  0  Minimal (~50 lines) - Single bash tool, self-recursion for subagents
-  1  Basic (~200 lines)  - 4 core tools: bash, read, write, edit
-  2  Todo (~300 lines)   - + TodoWrite for structured planning
-  3  Subagent (~450)     - + Task tool for context isolation
-  4  Skills (~550)       - + Skill tool for domain expertise
-        """
+  1     L1 - Agent Loop    (bash only)              ~ s01_agent_loop.py
+  2     L2 - Tool Use      (bash + files)           ~ s02_tool_use.py
+  3     L3 - Todo Write    (bash + files + todo)     ~ s03_todo_write.py
+  4     L4 - Subagent      (bash + files + subagent) ~ s04_subagent.py
+  5     L5 - Skill Loading (bash + files + skill)    ~ s05_skill_loading.py
+  6     L6 - Compact       (bash + files + compact)  ~ s06_context_compact.py
+  full  Full Agent         (all features)            ~ s_full.py
+        """),
     )
     parser.add_argument("name", help="Name of the agent to create")
-    parser.add_argument("--level", type=int, default=1, choices=[0, 1, 2, 3, 4],
-                       help="Complexity level (default: 1)")
-    parser.add_argument("--path", type=Path, default=Path.cwd(),
-                       help="Output directory (default: current directory)")
+    parser.add_argument(
+        "--level",
+        default="2",
+        help="Complexity level: 1-6 or 'full' (default: 2)",
+    )
+    parser.add_argument(
+        "--path",
+        type=Path,
+        default=None,
+        help="Output directory (default: example/)",
+    )
 
     args = parser.parse_args()
-    create_agent(args.name, args.level, args.path)
+
+    level = args.level
+    if level != "full":
+        try:
+            level = int(level)
+        except ValueError:
+            print(f"Error: level must be 1-6 or 'full', got '{level}'")
+            sys.exit(1)
+
+    if args.path is None:
+        repo_dir = Path(__file__).resolve().parent.parent.parent
+        output_dir = repo_dir / "example"
+    else:
+        output_dir = args.path.resolve()
+
+    create_agent(args.name, level, output_dir)
 
 
 if __name__ == "__main__":

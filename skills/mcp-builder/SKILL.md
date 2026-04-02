@@ -5,7 +5,7 @@ description: Build MCP (Model Context Protocol) servers that give Claude new cap
 
 # MCP Server Building Skill
 
-You now have expertise in building MCP (Model Context Protocol) servers. MCP enables Claude to interact with external services through a standardized protocol.
+You now have expertise in building MCP (Model Context Protocol) servers. MCP enables an AI client to interact with external services through a standardized protocol.
 
 ## What is MCP?
 
@@ -70,9 +70,17 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### 3. Register with Claude
+### 3. Register with an AI client
 
-Add to `~/.claude/mcp.json`:
+Each client (Cursor / Claude Desktop / other MCP-compatible hosts) has its own MCP configuration location and schema.
+
+In general, you register an MCP server by providing:
+- a **name**
+- a **command** (e.g. `python3`)
+- **args** pointing to your server entrypoint (e.g. `/path/to/my_server.py`)
+
+Example shape (do not assume the exact file path or schema for every client):
+
 ```json
 {
   "mcpServers": {

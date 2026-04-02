@@ -12,14 +12,14 @@ REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_DIR not in sys.path:
     sys.path.append(REPO_DIR)
 
-from learn_deepseek_code.common import LOG_DIR
-from learn_deepseek_code.common import print_answer
+from hex_claw.common import LOG_DIR
+from hex_claw.common import print_answer
 
-from learn_deepseek_code.agent import AgentMain, AgentMainConfig
+from hex_claw.agent import AgentMain, AgentMainConfig
 
-from learn_deepseek_code.kit import KitManager
-from learn_deepseek_code.kit import KitBash, KitBashConfig
-from learn_deepseek_code.kit import KitFiles, KitFilesConfig
+from hex_claw.kit import KitManager
+from hex_claw.kit import KitBash, KitBashConfig
+from hex_claw.kit import KitFiles, KitFilesConfig
 
 
 def main() -> int:
